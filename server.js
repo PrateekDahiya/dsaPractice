@@ -770,6 +770,7 @@ const server = http.createServer(async (req, res) => {
         let id=null;
         if (useDb) { await ensureDb(); if (dbReady) id = await db.dbCreateSubmission({questionId, title, language, mode, code, passed, total, results: results||[], userId}); }
         cache.leaderboard.clear();
+        if (userId && db.clearStatsCache) db.clearStatsCache(userId);
         return sendJson(res, { ok:true, id }, 201);
       } catch (e) { return sendJson(res, { error: e.message }, 500); }
     });

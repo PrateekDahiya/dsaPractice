@@ -85,9 +85,12 @@ async function initDb() {
   try { await pool.query(`ALTER TABLE code_saves DROP INDEX uniq_q_lang`); } catch {}
   try { await pool.query(`ALTER TABLE submissions DROP INDEX uniq_user_q_lang`); } catch {}
 
-  // indexes for dashboard speed
+  // indexes for dashboard speed (composite covering)
   try { await pool.query(`CREATE INDEX idx_sub_user_passed_mode_created ON submissions (userId, passed, mode, createdAt)`); } catch {}
   try { await pool.query(`CREATE INDEX idx_sub_user_q_created ON submissions (userId, questionId, createdAt)`); } catch {}
+  try { await pool.query(`CREATE INDEX idx_sub_user_passed_mode_qid ON submissions (userId, passed, mode, questionId)`); } catch {}
+  try { await pool.query(`CREATE INDEX idx_questions_created ON questions (createdAt)`); } catch {}
+  try { await pool.query(`CREATE INDEX idx_questions_difficulty ON questions (difficulty)`); } catch {}
   // Hikari-like warmup: pre-create 3 idle connections
   try {
     const { warmPool } = require('./pool');
