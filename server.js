@@ -654,7 +654,7 @@ const server = http.createServer(async (req, res) => {
     }
     const qs = await loadQuestions();
     qs.sort((a,b)=> (b._createdAt||0) - (a._createdAt||0));
-    const summaries = qs.map(q => ({ id: q.id, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt }));
+    const summaries = qs.map(q => ({ id: q.id, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt, addedBy: q.addedBy || null, addedByUsername: q.addedByUsername || null }));
     cache.questions = summaries;
     cache.questionsTs = now;
     return sendJson(res, summaries);
@@ -666,10 +666,8 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, q);
   }
   if (pathname === "/api/questions" && req.method === "POST") {
-    // admin guard: only role admin can create questions
     const u = requireAuth(req, res);
     if (!u) return;
-    if (u.role !== "admin") return sendJson(res, { error: "Forbidden: admin only" }, 403);
     let body = "";
     req.on("data", chunk => body += chunk);
     req.on("end", async () => {
@@ -698,15 +696,18 @@ const server = http.createServer(async (req, res) => {
           await ensureDb();
           if (dbReady) {
             try {
-              await db.dbCreateQuestion(q);
+              await db.dbCreateQuestion(q, u.id, u.username);
               savedToDb = true;
-              console.log(`DB: Created ${q.id}`);
+              console.log(`DB: Created ${q.id} by ${u.username}`);
             } catch (e) {
               if (String(e.message).includes("Duplicate")) return sendJson(res, { error: `Question id "${q.id}" already exists.` }, 409);
               console.warn("DB save failed, falling back to file:", e.message);
             }
           }
         }
+        // also store addedBy in file for backup
+        q.addedBy = u.id;
+        q.addedByUsername = u.username;
         const filePath = path.join(QUESTIONS_DIR, `${q.id}.json`);
         if (!savedToDb && fs.existsSync(filePath)) return sendJson(res, { error: `Question id "${q.id}" already exists (${q.id}.json). Use different id or delete old file.` }, 409);
         if (!fs.existsSync(filePath)) {

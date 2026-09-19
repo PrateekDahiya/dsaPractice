@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
   <header class="topbar">
     <div class="topbar-left">
       <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
@@ -45,6 +46,8 @@
         a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
       }
     }
+    function showLoader(){ const el=document.getElementById("top-loader"); if(el){ el.classList.remove("done"); el.classList.add("active"); void el.offsetWidth; el.style.width="70%"; } }
+    function hideLoader(){ const el=document.getElementById("top-loader"); if(el){ el.style.width="100%"; el.classList.add("done"); setTimeout(()=>{ el.classList.remove("active","done"); el.style.width="0%"; },300); } }
     function levelClass(count){
       if(count===0) return "";
       if(count===1) return "l1";
@@ -83,13 +86,14 @@
     }
 
     async function init(){
+      const root=document.getElementById("dash-root");
+      root.innerHTML=`<div class="loading">Loading dashboard...</div><div style="display:grid;gap:12px;margin-top:16px"><div class="skeleton card" style="height:180px"></div><div class="skeleton card" style="height:120px"></div><div class="skeleton card" style="height:200px"></div></div>`;
+      showLoader();
       const params=new URLSearchParams(location.search);
       let viewId = params.get("id") || params.get("user") || params.get("userId");
-      // also support hash #id or /u/:id via search
       if(!viewId && location.hash && /^\d+$/.test(location.hash.slice(1))) viewId=location.hash.slice(1);
       const me = getUser();
       const token=getToken();
-      // verify token
       if(token){
         try{ const r=await fetch("/api/me",{ headers:{ Authorization:"Bearer "+token } }); if(r.ok){ const u=await r.json(); localStorage.setItem("user",JSON.stringify(u)); updateTopbar(u);} else { clearAuth(); updateTopbar(null);} }catch{ updateTopbar(me); }
       } else updateTopbar(null);
@@ -107,7 +111,9 @@
       let data, questions;
       try{
         [data, questions] = await Promise.all([fetchDashboard(targetId), fetchQuestionsSummaries()]);
+        hideLoader();
       }catch(e){
+        hideLoader();
         document.getElementById("dash-root").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><h2 style="color:var(--text)">Error</h2><p>${esc(e.message)}</p></div>`;
         return;
       }
@@ -144,9 +150,12 @@
         </div>
       `).join("");
 
-      const recentHtml = recent.length? `<ul>${recent.map(r=>`<li><a href="index.html#${esc(r.questionId)}">${esc(r.title)}</a><span style="display:flex;gap:6px;align-items:center"><span class="badge ${esc(r.difficulty)}">${esc(r.difficulty)}</span><span style="color:var(--muted);font-size:11px">${new Date(r.solvedAt).toLocaleDateString()}</span></span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No solves yet — start solving!</div>`;
+      const recentHtml = recent.length? `<ul>${recent.map(r=>`<li><a href="index.html#${esc(r.questionId)}" class="q-link">${esc(r.title)}</a><span style="display:flex;gap:6px;align-items:center"><span class="badge ${esc(r.difficulty)}">${esc(r.difficulty)}</span><span style="color:var(--muted);font-size:11px">${new Date(r.solvedAt).toLocaleDateString()}</span></span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No solves yet — start solving!</div>`;
 
-      const unsolvedHtml = unsolved.length? `<ul>${unsolved.slice(0,12).map(q=>`<li><a href="index.html#${esc(q.id)}">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`).join("")}${unsolved.length>12? `<li style="justify-content:center;color:var(--muted)">+${unsolved.length-12} more</li>`:""}</ul>` : `<div style="color:var(--muted);font-size:13px">All caught up! 🎉</div>`;
+      const unsolvedHtml = unsolved.length? `<ul>${unsolved.slice(0,12).map(q=>`<li><a href="index.html#${esc(q.id)}" class="q-link">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`).join("")}${unsolved.length>12? `<li style="justify-content:center;color:var(--muted)">+${unsolved.length-12} more</li>`:""}</ul>` : `<div style="color:var(--muted);font-size:13px">All caught up! 🎉</div>`;
+
+      const added = questions.filter(q=> String(q.addedBy)===String(me?.id) || (q.addedByUsername && me && q.addedByUsername===me.username));
+      const addedHtml = added.length? `<ul>${added.map(q=>`<li><a href="index.html#${esc(q.id)}" class="q-link">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No questions added yet. <a href="add-question.html" style="color:var(--accent)">Add one</a></div>`;
 
       document.getElementById("dash-root").innerHTML=`
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
@@ -182,6 +191,7 @@
           <div class="list-card"><h3>Recently solved</h3>${recentHtml}</div>
           <div class="list-card"><h3>Unsolved</h3>${unsolvedHtml}</div>
         </div>
+        <div class="list-card" style="margin-top:16px"><h3>Added Questions <span style="color:var(--muted);font-weight:400">(${added.length})</span></h3>${addedHtml}</div>
         ${isOther? `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Read-only view — code history hidden for privacy.</div>` : `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Your submissions are private and scoped per user. Code autosaves every 10s to DB with your token.</div>`}
       `;
     }

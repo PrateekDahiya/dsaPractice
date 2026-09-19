@@ -91,6 +91,10 @@ async function initDb() {
   try { await pool.query(`CREATE INDEX idx_sub_user_passed_mode_qid ON submissions (userId, passed, mode, questionId)`); } catch {}
   try { await pool.query(`CREATE INDEX idx_questions_created ON questions (createdAt)`); } catch {}
   try { await pool.query(`CREATE INDEX idx_questions_difficulty ON questions (difficulty)`); } catch {}
+  try { await pool.query(`ALTER TABLE questions ADD COLUMN addedBy INT NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE questions ADD COLUMN addedByUsername VARCHAR(50) NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE questions ADD INDEX idx_addedBy (addedBy)`); } catch {}
+  try { await pool.query(`ALTER TABLE questions ADD CONSTRAINT fk_questions_addedBy FOREIGN KEY (addedBy) REFERENCES users(id) ON DELETE SET NULL`); } catch {}
   // Hikari-like warmup: pre-create 3 idle connections
   try {
     const { warmPool } = require('./pool');

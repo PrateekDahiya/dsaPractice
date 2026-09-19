@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
   <header class="topbar">
     <div class="topbar-left">
       <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
@@ -66,6 +67,8 @@
         a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
       }
     }
+    function showLoader(){ const el=document.getElementById("top-loader"); if(el){ el.classList.remove("done"); el.classList.add("active"); void el.offsetWidth; el.style.width="70%"; } }
+    function hideLoader(){ const el=document.getElementById("top-loader"); if(el){ el.style.width="100%"; el.classList.add("done"); setTimeout(()=>{ el.classList.remove("active","done"); el.style.width="0%"; },300); } }
     let currentFilter="all";
     async function fetchLeaderboard(filter){
       const headers=authHeaders({});
@@ -103,10 +106,12 @@
       currentFilter=filter;
       document.querySelectorAll("#filter-tabs button").forEach(b=> b.classList.toggle("active", b.dataset.filter===filter));
       const loading=$("#lb-loading"); const table=$("#lb-table"); const body=$("#lb-body"); const empty=$("#lb-empty");
-      loading.classList.remove("hidden"); table.classList.add("hidden"); empty.classList.add("hidden");
+      loading.innerHTML=`<div class="loading">Loading leaderboard...</div>`; loading.classList.remove("hidden"); table.classList.add("hidden"); empty.classList.add("hidden");
+      showLoader();
       try{
         let rows=await fetchLeaderboard(filter);
         rows=await enrichWithStreak(rows);
+        hideLoader();
         loading.classList.add("hidden");
         if(!rows.length){ empty.classList.remove("hidden"); return; }
         table.classList.remove("hidden");
@@ -123,6 +128,7 @@
           </tr>`;
         }).join("");
       }catch(e){
+        hideLoader();
         loading.textContent="Error: "+e.message;
         loading.classList.remove("hidden");
       }

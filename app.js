@@ -55,6 +55,17 @@ async function cachedApiFetch(url, ttl=15000){
 function invalidateCache(prefix){
   for(const k of _apiCache.keys()) if(k.startsWith(prefix)) _apiCache.delete(k);
 }
+function showLoader(){ const el=document.getElementById("top-loader"); if(el){ el.classList.remove("done"); el.classList.add("active"); void el.offsetWidth; el.style.width="70%"; } }
+function hideLoader(){ const el=document.getElementById("top-loader"); if(el){ el.style.width="100%"; el.classList.add("done"); setTimeout(()=>{ el.classList.remove("active","done"); el.style.width="0%"; },300); } }
+function setLoading(el, isLoading, msg="Loading..."){
+  if(!el) return;
+  if(isLoading){
+    el.dataset.prev = el.innerHTML;
+    el.innerHTML = `<div class="loading">${msg}</div>`;
+  } else if(el.dataset.prev !== undefined){
+    // keep for skeleton case, caller will overwrite
+  }
+}
 function updateTopbar(user){
   const authArea = document.getElementById("auth-area");
   if(!authArea) return;
@@ -73,7 +84,6 @@ function updateTopbar(user){
       clearAuth();
       updateTopbar(null);
       toast("Logged out");
-      // refresh solved indicators
       solvedSet.clear(); attemptedSet.clear();
       renderList();
       renderHistory();
@@ -166,33 +176,34 @@ async function refreshSolvedState(){
 }
 
 async function fetchQuestions() {
+  if(questionListEl) questionListEl.innerHTML = `<div class="loading">Loading problems...</div>`;
+  showLoader();
   try {
-    // UI cache 15s: instant second load
     try {
       const cached = await cachedApiFetch("/api/questions", 15000);
       questions = await cached.json();
-      // background revalidate after 2s
+      populateTagFilter(); renderList();
       setTimeout(async () => {
         try {
           const fresh = await apiFetch("/api/questions");
           if (fresh.ok) {
             const data = await fresh.json();
             _apiCache.set("/api/questions", { data: JSON.parse(JSON.stringify(data)), ts: Date.now() });
-            // only update if changed
             if (JSON.stringify(data) !== JSON.stringify(questions)) {
-              questions = data;
-              populateTagFilter();
-              renderList();
+              questions = data; populateTagFilter(); renderList();
             }
           }
         } catch {}
       }, 2000);
+      hideLoader();
       return;
     } catch {}
     const res = await apiFetch("/api/questions");
     if (!res.ok) throw new Error("api failed");
     questions = await res.json();
     _apiCache.set("/api/questions", { data: JSON.parse(JSON.stringify(questions)), ts: Date.now() });
+    populateTagFilter(); renderList();
+    hideLoader();
   } catch (e) {
     console.warn("API not available, fallback to static probe", e);
     const ids = ["two-sum", "reverse-string", "valid-parentheses"];
@@ -251,6 +262,8 @@ function renderList() {
 }
 
 async function loadQuestion(id) {
+  if(problemViewEl) problemViewEl.innerHTML = `<div class="loading">Loading problem...</div>`;
+  showLoader();
   try {
     let q;
     const res = await apiFetch(`/api/questions/${id}`);
@@ -267,9 +280,11 @@ async function loadQuestion(id) {
     if(statusText) statusText.textContent = `Loaded: ${q.title}`;
     history.replaceState(null, "", `#${id}`);
     renderHistory();
+    hideLoader();
   } catch (e) {
     console.error(e);
     toast("Failed to load question: " + id);
+    hideLoader();
   }
 }
 
@@ -697,6 +712,7 @@ async function renderHistory() {
   const listEl = document.getElementById("history-list");
   const detailEl = document.getElementById("history-detail");
   if (!listEl) return;
+  listEl.innerHTML = `<div class="loading">Loading history...</div>`;
   const all = await fetchHistoryFromDb();
   const filtered = all;
   // detect read-only view (other user's dashboard)
@@ -787,9 +803,11 @@ async function execute(mode) {
   const code = codeEditor.value;
   if (!code.trim()) { toast("Write some code first"); return; }
   saveCode();
-  if(runBtn) runBtn.disabled = true; if(submitBtn) submitBtn.disabled = true;
+  showLoader();
+  if(runBtn) { runBtn.disabled = true; runBtn.innerHTML = `<span class="loading" style="padding:0;gap:6px">Running...</span>`; }
+  if(submitBtn) submitBtn.disabled = true;
   if(statusText) statusText.textContent = mode==="run" ? "Running visible tests..." : "Submitting (all tests)...";
-  if(resultsEl) resultsEl.innerHTML = `<div style="color:var(--muted);font-size:13px">Executing…</div>`;
+  if(resultsEl) resultsEl.innerHTML = `<div class="loading">Executing ${mode==="run"?"visible":"all"} tests...</div>`;
   let payload = null;
   let execError = null;
   try {
@@ -816,7 +834,9 @@ async function execute(mode) {
       if(statusText) statusText.textContent = "Execution error";
     }
   } finally {
-    if(runBtn) runBtn.disabled = false; if(submitBtn) submitBtn.disabled = false;
+    hideLoader();
+    if(runBtn) { runBtn.disabled = false; runBtn.textContent = "Run"; }
+    if(submitBtn) submitBtn.disabled = false;
     if (payload) {
       saveHistoryEntry({
         id: Date.now() + "_" + Math.random().toString(36).slice(2,6),

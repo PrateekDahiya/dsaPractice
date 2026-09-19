@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Add Question — DSA Practice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="index.html" class="ghost-link">Problems</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+        <a href="add-question.html" class="ghost-link" style="border-color:var(--accent);color:var(--text)">Add Question</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div style="max-width:900px;margin:0 auto;padding:20px;width:100%">
+    <h1 style="font-size:22px;margin-bottom:6px">Add New Question</h1>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px">Create a JSON question — it will be saved to MySQL and appear in the list sorted by recently added. Author is tracked as you.</p>
+
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button id="load-template-page" class="btn ghost">Load Template</button>
+      <label class="btn ghost" style="cursor:pointer">Import .json <input type="file" id="import-file-page" accept=".json" hidden></label>
+      <button id="validate-page" class="btn secondary">Validate</button>
+      <a href="questions/_schema.json" target="_blank" class="ghost-link" style="margin-left:auto">View _schema.json</a>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Slug ID * <input id="f-id-page" placeholder="e.g. two-sum (a-z0-9-)" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Title * <input id="f-title-page" placeholder="Two Sum" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Difficulty * <select id="f-diff-page" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"><option>Easy</option><option>Medium</option><option>Hard</option></select></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Tags (comma) <input id="f-tags-page" placeholder="Array, Hash Map" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Function (JS) * <input id="f-fn-page" placeholder="twoSum" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Function (Python) <input id="f-pyfn-page" placeholder="two_sum" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Function (C++) <input id="f-cppfn-page" placeholder="twoSum" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Params (comma) * <input id="f-params-page" placeholder="nums, target" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px"></label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Problem Statement (HTML allowed) * <textarea id="f-statement-page" rows="4" placeholder="Given nums..." style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--sans)"></textarea></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Constraints (one per line) <textarea id="f-constraints-page" rows="3" placeholder="2 <= nums.length <= 10^4" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Examples JSON <textarea id="f-examples-page" rows="3" placeholder='[{"input":"nums=[2,7,11,15], target=9","output":"[0,1]"}]' style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Starter JS * <textarea id="f-starter-js-page" rows="5" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Starter Python <textarea id="f-starter-py-page" rows="5" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+    </div>
+    <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600;margin-top:12px">Starter C++ <textarea id="f-starter-cpp-page" rows="5" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Visible Tests JSON * <textarea id="f-visible-page" rows="6" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+      <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Hidden Tests JSON * <textarea id="f-hidden-page" rows="6" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:var(--mono)"></textarea></label>
+    </div>
+
+    <div style="margin-top:16px">
+      <h3 style="font-size:14px;margin-bottom:8px">Raw JSON Preview (editable)</h3>
+      <textarea id="json-preview-page" spellcheck="false" style="width:100%;min-height:240px;background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px"></textarea>
+      <div id="json-error-page" class="form-error hidden" style="margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="gen-json-page" class="btn secondary">Generate JSON from form</button>
+        <button id="save-page" class="btn primary" style="margin-left:auto">Save Question</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    const topAuth=$("#auth-area");
+    // topbar auth
+    (async()=>{
+      const u=getUser(); const t=getToken();
+      if(t){
+        try{ const r=await fetch("/api/me",{headers:{Authorization:"Bearer "+t}}); if(r.ok){ const nu=await r.json(); localStorage.setItem("user",JSON.stringify(nu)); document.getElementById("auth-area").innerHTML=`<span style="font-weight:600">${esc(nu.username)}</span><button onclick="localStorage.clear();location.href='login.html'" class="btn ghost" style="padding:6px 10px">Logout</button>`; } else { document.getElementById("auth-area").innerHTML=`<a href="login.html" class="ghost-link">Login</a>`; } }catch{}
+      } else {
+        const a=document.getElementById("auth-area");
+        if(a) a.innerHTML=`<a href="login.html" class="ghost-link">Login</a>`;
+      }
+    })();
+
+    function validateQuestion(q){
+      const errs=[];
+      if(!q.id || !/^[a-z0-9-]+$/.test(q.id)) errs.push("id must match ^[a-z0-9-]+$");
+      if(!q.title) errs.push("title required");
+      if(!["Easy","Medium","Hard"].includes(q.difficulty)) errs.push("difficulty");
+      if(!q.problemStatement) errs.push("problemStatement");
+      if(!q.functionName) errs.push("functionName");
+      if(!Array.isArray(q.params)||!q.params.length) errs.push("params");
+      if(!q.starterCode||!q.starterCode.javascript) errs.push("starterCode.javascript");
+      if(!Array.isArray(q.visibleTestCases)||!q.visibleTestCases.length) errs.push("visibleTestCases");
+      if(!Array.isArray(q.hiddenTestCases)) errs.push("hiddenTestCases");
+      return errs;
+    }
+    function buildFromForm(){
+      const q={
+        id: $("#f-id-page").value.trim(),
+        title: $("#f-title-page").value.trim(),
+        difficulty: $("#f-diff-page").value,
+        tags: $("#f-tags-page").value.split(",").map(s=>s.trim()).filter(Boolean),
+        problemStatement: $("#f-statement-page").value.trim(),
+        constraints: $("#f-constraints-page").value.split("\n").map(s=>s.trim()).filter(Boolean),
+        examples: JSON.parse($("#f-examples-page").value.trim()||"[]"),
+        functionName: $("#f-fn-page").value.trim(),
+        pythonFunctionName: $("#f-pyfn-page").value.trim()||undefined,
+        cppFunctionName: $("#f-cppfn-page").value.trim()||undefined,
+        params: $("#f-params-page").value.split(",").map(s=>s.trim()).filter(Boolean),
+        starterCode: {
+          javascript: $("#f-starter-js-page").value,
+          python: $("#f-starter-py-page").value||undefined,
+          cpp: $("#f-starter-cpp-page").value||undefined
+        },
+        visibleTestCases: JSON.parse($("#f-visible-page").value.trim()||"[]"),
+        hiddenTestCases: JSON.parse($("#f-hidden-page").value.trim()||"[]")
+      };
+      if(!q.pythonFunctionName) delete q.pythonFunctionName;
+      if(!q.cppFunctionName) delete q.cppFunctionName;
+      if(!q.starterCode.python) delete q.starterCode.python;
+      if(!q.starterCode.cpp) delete q.starterCode.cpp;
+      return q;
+    }
+    function fillPreview(){
+      try{
+        const q=buildFromForm();
+        $("#json-preview-page").value=JSON.stringify(q,null,2);
+        const err=$("#json-error-page");
+        const errs=validateQuestion(q);
+        if(errs.length){ err.textContent="Fix: "+errs.join("; "); err.classList.remove("hidden","ok"); }
+        else { err.textContent="✓ Valid — ready to save"; err.classList.remove("hidden"); err.classList.add("ok"); }
+      }catch(e){ const err=$("#json-error-page"); err.textContent="Form error: "+e.message; err.classList.remove("hidden"); }
+    }
+    // auto update preview on input
+    document.querySelectorAll("#f-id-page,#f-title-page,#f-diff-page,#f-tags-page,#f-fn-page,#f-pyfn-page,#f-cppfn-page,#f-params-page,#f-statement-page,#f-constraints-page,#f-examples-page,#f-starter-js-page,#f-starter-py-page,#f-starter-cpp-page,#f-visible-page,#f-hidden-page").forEach(el=> el.addEventListener("input", fillPreview));
+    $("#gen-json-page").addEventListener("click", fillPreview);
+    $("#load-template-page").addEventListener("click", ()=>{
+      $("#f-id-page").value="my-question";
+      $("#f-title-page").value="My Question";
+      $("#f-diff-page").value="Easy";
+      $("#f-tags-page").value="Array";
+      $("#f-fn-page").value="solve";
+      $("#f-pyfn-page").value="solve";
+      $("#f-cppfn-page").value="solve";
+      $("#f-params-page").value="nums, target";
+      $("#f-statement-page").value="Describe problem...";
+      $("#f-constraints-page").value="1 <= n <= 10^5";
+      $("#f-examples-page").value='[{"input":"nums=[1,2,3], target=3","output":"[0,1]"}]';
+      $("#f-starter-js-page").value="function solve(nums, target) {\n  // write code\n}";
+      $("#f-starter-py-page").value="def solve(nums, target):\n    pass";
+      $("#f-starter-cpp-page").value="#include <bits/stdc++.h>\nusing namespace std;\n\nvector<int> solve(vector<int>& nums, int target) {\n}";
+      $("#f-visible-page").value='[{"id":"v1","input":{"nums":[1,2,3],"target":3},"expectedOutput":[0,1]}]';
+      $("#f-hidden-page").value='[{"id":"h1","input":{"nums":[0,0],"target":0},"expectedOutput":[0,1]}]';
+      fillPreview();
+    });
+    $("#validate-page").addEventListener("click", ()=>{
+      try{ const q=JSON.parse($("#json-preview-page").value); const errs=validateQuestion(q); const el=$("#json-error-page"); if(errs.length){ el.textContent="Invalid: "+errs.join("; "); el.classList.remove("ok"); el.classList.remove("hidden"); } else { el.textContent="✓ Valid"; el.classList.add("ok"); el.classList.remove("hidden"); } }catch(e){ const el=$("#json-error-page"); el.textContent="Invalid JSON: "+e.message; el.classList.remove("hidden"); }
+    });
+    $("#import-file-page").addEventListener("change", async (e)=>{
+      const f=e.target.files[0]; if(!f) return;
+      const text=await f.text();
+      try{ const q=JSON.parse(text); // fill form if possible
+        $("#f-id-page").value=q.id||""; $("#f-title-page").value=q.title||""; $("#f-diff-page").value=q.difficulty||"Easy"; $("#f-tags-page").value=(q.tags||[]).join(", "); $("#f-fn-page").value=q.functionName||""; $("#f-pyfn-page").value=q.pythonFunctionName||""; $("#f-cppfn-page").value=q.cppFunctionName||""; $("#f-params-page").value=(q.params||[]).join(", "); $("#f-statement-page").value=q.problemStatement||""; $("#f-constraints-page").value=(q.constraints||[]).join("\n"); $("#f-examples-page").value=JSON.stringify(q.examples||[],null,2); $("#f-starter-js-page").value=q.starterCode?.javascript||""; $("#f-starter-py-page").value=q.starterCode?.python||""; $("#f-starter-cpp-page").value=q.starterCode?.cpp||""; $("#f-visible-page").value=JSON.stringify(q.visibleTestCases||[],null,2); $("#f-hidden-page").value=JSON.stringify(q.hiddenTestCases||[],null,2);
+      }catch{}
+      $("#json-preview-page").value=text;
+    });
+    $("#save-page").addEventListener("click", async ()=>{
+      const btn=$("#save-page");
+      let q;
+      try{ q=JSON.parse($("#json-preview-page").value); }catch(e){ const el=$("#json-error-page"); el.textContent="Invalid JSON: "+e.message; el.classList.remove("hidden"); return; }
+      const errs=validateQuestion(q);
+      if(errs.length){ const el=$("#json-error-page"); el.textContent="Fix: "+errs.join("; "); el.classList.remove("hidden"); return; }
+      const t=getToken();
+      if(!t){ toast("Login required to add question"); location.href="login.html"; return; }
+      btn.disabled=true; btn.textContent="Saving...";
+      try{
+        const res=await fetch("/api/questions",{method:"POST",headers:{...authHeaders({"Content-Type":"application/json"})},body:JSON.stringify(q)});
+        const data=await res.json();
+        if(!res.ok) throw new Error(data.error||"save failed");
+        toast("Saved "+q.id+" ✓");
+        setTimeout(()=> location.href="index.html#"+q.id, 800);
+      }catch(e){
+        const el=$("#json-error-page"); el.textContent="Save failed: "+e.message; el.classList.remove("hidden");
+      } finally { btn.disabled=false; btn.textContent="Save Question"; }
+    });
+    // init preview
+    fillPreview();
+  </script>
+</body>
+</html>

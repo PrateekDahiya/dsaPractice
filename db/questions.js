@@ -26,7 +26,7 @@ async function migrateFromFiles(questionsDir) {
 
 async function dbLoadQuestions() {
   try {
-    const [rows] = await getPool().query('SELECT * FROM questions ORDER BY createdAt DESC');
+    const [rows] = await getPool().query('SELECT q.*, u.username as addedByUsername FROM questions q LEFT JOIN users u ON q.addedBy = u.id ORDER BY q.createdAt DESC');
     return rows.map(r => ({
       id: r.id, title: r.title, difficulty: r.difficulty,
       tags: typeof r.tags==='string' ? JSON.parse(r.tags) : r.tags || [],
@@ -40,6 +40,8 @@ async function dbLoadQuestions() {
       hiddenTestCases: typeof r.hiddenTestCases==='string' ? JSON.parse(r.hiddenTestCases) : r.hiddenTestCases,
       createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
       updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+      addedBy: r.addedBy || null,
+      addedByUsername: r.addedByUsername || null,
       _createdAt: r.createdAt ? new Date(r.createdAt).getTime() : Date.now(),
       _file: r.id+'.json'
     }));
@@ -50,7 +52,7 @@ async function dbLoadQuestions() {
 }
 
 async function dbGetQuestion(id) {
-  const [rows] = await getPool().query('SELECT * FROM questions WHERE id=?', [id]);
+  const [rows] = await getPool().query('SELECT q.*, u.username as addedByUsername FROM questions q LEFT JOIN users u ON q.addedBy = u.id WHERE q.id=?', [id]);
   if (!rows.length) return null;
   const r = rows[0];
   return {
@@ -66,16 +68,18 @@ async function dbGetQuestion(id) {
     hiddenTestCases: typeof r.hiddenTestCases==='string' ? JSON.parse(r.hiddenTestCases) : r.hiddenTestCases,
     createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
     updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+    addedBy: r.addedBy || null,
+    addedByUsername: r.addedByUsername || null,
   };
 }
 
-async function dbCreateQuestion(q) {
+async function dbCreateQuestion(q, addedBy=null, addedByUsername=null) {
   const pool = getPool();
   const createdAt = q.createdAt ? new Date(q.createdAt) : new Date();
   await pool.query(
-    `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,createdAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), createdAt]
+    `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,createdAt,addedBy,addedByUsername)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), createdAt, addedBy, addedByUsername]
   );
 }
 
