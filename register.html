@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register — DSA Practice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="index.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="login.html" class="ghost-link">Login</a>
+    </div>
+  </header>
+  <div class="auth-wrap">
+    <form class="auth-card" id="register-form" autocomplete="on">
+      <h1>Create account</h1>
+      <p class="muted">Username 3-20 chars (a-z0-9_). Email optional.</p>
+      <label>Username <span style="color:var(--red)">*</span>
+        <input id="username" name="username" placeholder="e.g. coder123" required pattern="^[a-z0-9_]{3,20}$" />
+      </label>
+      <label>Email (optional)
+        <input id="email" name="email" type="email" placeholder="you@example.com" />
+      </label>
+      <label>Password <span style="color:var(--red)">*</span>
+        <input id="password" name="password" type="password" placeholder="min 6 characters" required minlength="6" />
+      </label>
+      <label>Confirm Password <span style="color:var(--red)">*</span>
+        <input id="confirm" type="password" placeholder="repeat password" required minlength="6" />
+      </label>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:8px;padding:10px">Create account</button>
+      <div id="auth-error" class="auth-error hidden"></div>
+      <p style="margin-top:12px;font-size:13px;color:var(--muted);text-align:center">Have account? <a href="login.html" style="color:var(--accent)">Login</a></p>
+    </form>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    document.getElementById("register-form").addEventListener("submit", async (e)=>{
+      e.preventDefault();
+      const username=$("#username").value.trim();
+      const email=$("#email").value.trim();
+      const password=$("#password").value;
+      const confirm=$("#confirm").value;
+      const errEl=$("#auth-error");
+      errEl.classList.add("hidden");
+      if(password!==confirm){ errEl.textContent="Passwords do not match"; errEl.classList.remove("hidden"); return; }
+      const btn=e.target.querySelector("button[type=submit]");
+      btn.disabled=true; btn.textContent="Creating...";
+      try{
+        const payload={ username, password };
+        if(email) payload.email=email;
+        const res=await fetch("/api/auth/register",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+        const data=await res.json().catch(()=>({}));
+        if(!res.ok) throw new Error(data.error || "Registration failed");
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        toast("Registered as "+data.user.username);
+        setTimeout(()=> location.href="index.html", 600);
+      }catch(err){
+        errEl.textContent=err.message;
+        errEl.classList.remove("hidden");
+      } finally{ btn.disabled=false; btn.textContent="Create account"; }
+    });
+  </script>
+</body>
+</html>

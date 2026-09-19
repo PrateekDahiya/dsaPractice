@@ -1,0 +1,148 @@
+{
+  "id": "find-missing-number",
+  "title": "Find the Missing Number",
+  "difficulty": "Easy",
+  "tags": [
+    "Array",
+    "Math",
+    "Bit Manipulation"
+  ],
+  "problemStatement": "Given an array <code>nums</code> containing <code>n</code> distinct numbers taken from the range <code>[0, n]</code>, return the only number in the range that is missing from the array.",
+  "constraints": [
+    "1 <= nums.length <= 10^5",
+    "0 <= nums[i] <= n",
+    "All the numbers in nums are unique"
+  ],
+  "examples": [
+    {
+      "input": "nums = [3,0,1]",
+      "output": "2",
+      "explanation": "The numbers from 0 to 3 are [0,1,2,3]. The number 2 is missing."
+    },
+    {
+      "input": "nums = [0,1]",
+      "output": "2",
+      "explanation": "The numbers from 0 to 2 are [0,1,2]. The number 2 is missing."
+    },
+    {
+      "input": "nums = [9,6,4,2,3,5,7,0,1]",
+      "output": "8",
+      "explanation": "The numbers from 0 to 9 are present except for 8."
+    }
+  ],
+  "functionName": "findMissingNumber",
+  "pythonFunctionName": "find_missing_number",
+  "cppFunctionName": "findMissingNumber",
+  "params": [
+    "nums"
+  ],
+  "starterCode": {
+    "javascript": "function findMissingNumber(nums) {\n  // Write your code here\n}",
+    "python": "def find_missing_number(nums):\n    # Write your code here\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint findMissingNumber(vector<int>& nums) {\n    // Write your code here\n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": {
+        "nums": [
+          3,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 2
+    },
+    {
+      "id": "v2",
+      "input": {
+        "nums": [
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 2
+    },
+    {
+      "id": "v3",
+      "input": {
+        "nums": [
+          9,
+          6,
+          4,
+          2,
+          3,
+          5,
+          7,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 8
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": {
+        "nums": [
+          0
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "h2",
+      "input": {
+        "nums": [
+          1
+        ]
+      },
+      "expectedOutput": 0
+    },
+    {
+      "id": "h3",
+      "input": {
+        "nums": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "expectedOutput": 6
+    },
+    {
+      "id": "h4",
+      "input": {
+        "nums": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          0
+        ]
+      },
+      "expectedOutput": 10
+    },
+    {
+      "id": "h5",
+      "input": {
+        "nums": [
+          4,
+          0,
+          3,
+          1
+        ]
+      },
+      "expectedOutput": 2
+    }
+  ]
+}

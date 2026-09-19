@@ -1,0 +1,150 @@
+{
+  "id": "maximum-consecutive-ones",
+  "title": "Maximum Consecutive Ones",
+  "difficulty": "Easy",
+  "tags": [
+    "Array",
+    "Traversal"
+  ],
+  "problemStatement": "Given a binary array <code>nums</code> containing only <code>0</code> and <code>1</code>, return the maximum number of consecutive <code>1</code>s in the array.",
+  "constraints": [
+    "1 <= nums.length <= 10^5",
+    "nums[i] is either 0 or 1"
+  ],
+  "examples": [
+    {
+      "input": "nums = [1,1,0,1,1,1]",
+      "output": "3",
+      "explanation": "The longest sequence of consecutive 1s is [1,1,1], which has length 3."
+    },
+    {
+      "input": "nums = [1,0,1,1,0,1]",
+      "output": "2",
+      "explanation": "The longest sequence of consecutive 1s is [1,1], which has length 2."
+    },
+    {
+      "input": "nums = [0,0,0]",
+      "output": "0",
+      "explanation": "There are no 1s in the array."
+    }
+  ],
+  "functionName": "findMaxConsecutiveOnes",
+  "pythonFunctionName": "find_max_consecutive_ones",
+  "cppFunctionName": "findMaxConsecutiveOnes",
+  "params": [
+    "nums"
+  ],
+  "starterCode": {
+    "javascript": "function findMaxConsecutiveOnes(nums) {\n  // Write your code here\n}",
+    "python": "def find_max_consecutive_ones(nums):\n    # Write your code here\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint findMaxConsecutiveOnes(vector<int>& nums) {\n    // Write your code here\n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": {
+        "nums": [
+          1,
+          1,
+          0,
+          1,
+          1,
+          1
+        ]
+      },
+      "expectedOutput": 3
+    },
+    {
+      "id": "v2",
+      "input": {
+        "nums": [
+          1,
+          0,
+          1,
+          1,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 2
+    },
+    {
+      "id": "v3",
+      "input": {
+        "nums": [
+          0,
+          0,
+          0
+        ]
+      },
+      "expectedOutput": 0
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": {
+        "nums": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "expectedOutput": 5
+    },
+    {
+      "id": "h2",
+      "input": {
+        "nums": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "h3",
+      "input": {
+        "nums": [
+          1
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "h4",
+      "input": {
+        "nums": [
+          0
+        ]
+      },
+      "expectedOutput": 0
+    },
+    {
+      "id": "h5",
+      "input": {
+        "nums": [
+          1,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 4
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "id": "valid-parentheses",
+  "title": "Valid Parentheses",
+  "difficulty": "Easy",
+  "tags": ["Stack", "String"],
+  "problemStatement": "Given a string <code>s</code> containing just the characters <code>'('</code>, <code>')'</code>, <code>'{'</code>, <code>'}'</code>, <code>'['</code> and <code>']'</code>, determine if the input string is valid.\n\nAn input string is valid if:\n<ul><li>Open brackets must be closed by the same type of brackets.</li><li>Open brackets must be closed in the correct order.</li><li>Every close bracket has a corresponding open bracket of the same type.</li></ul>",
+  "constraints": [
+    "1 <= s.length <= 10^4",
+    "s consists of parentheses only '()[]{}'."
+  ],
+  "examples": [
+    {
+      "input": "s = \"()\"",
+      "output": "true",
+      "explanation": "Simple valid pair."
+    },
+    {
+      "input": "s = \"()[]{}\"",
+      "output": "true",
+      "explanation": ""
+    },
+    {
+      "input": "s = \"(]\"",
+      "output": "false",
+      "explanation": "Mismatched types."
+    }
+  ],
+  "functionName": "isValid",
+  "pythonFunctionName": "is_valid",
+  "params": ["s"],
+  "cppFunctionName": "isValid",
+  "starterCode": {
+    "javascript": "function isValid(s) {\n    // Return true if valid parentheses, else false\n    \n}",
+    "python": "def is_valid(s):\n    # Return True if valid parentheses, else False\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nbool isValid(string s) {\n    // Return true if valid\n    \n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": { "s": "()" },
+      "expectedOutput": true
+    },
+    {
+      "id": "v2",
+      "input": { "s": "()[]{}" },
+      "expectedOutput": true
+    },
+    {
+      "id": "v3",
+      "input": { "s": "(]" },
+      "expectedOutput": false
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": { "s": "([)]" },
+      "expectedOutput": false
+    },
+    {
+      "id": "h2",
+      "input": { "s": "{[]}" },
+      "expectedOutput": true
+    },
+    {
+      "id": "h3",
+      "input": { "s": "]" },
+      "expectedOutput": false
+    }
+  ]
+}

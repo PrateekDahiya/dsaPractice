@@ -1,0 +1,12 @@
+/* base.css — variables, reset, scrollbar, topbar */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --bg:#0f1117; --panel:#1a1d24; --panel2:#1e222c; --border:#2a2f3a; --text:#e6e8eb; --muted:#9aa0ad; --accent:#ffa116; --accent-hover:#ffb340; --green:#00b8a3; --red:#ff3757; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --sans: Inter, system-ui, sans-serif; }
+* { scrollbar-width: thin; scrollbar-color: #2a2f3a var(--panel); }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: var(--panel); }
+*::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 6px; border: 1px solid var(--panel); }
+*::-webkit-scrollbar-thumb:hover { background: #3a4050; }
+body { font-family: var(--sans); background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.topbar { height: 48px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border); background: #15181f; flex-shrink: 0; }
+.topbar-left { display: flex; align-items: center; gap: 10px; }
+.logo { font-weight: 800; letter-spacing: 0.3px; }

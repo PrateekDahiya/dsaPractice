@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DSA Practice Platform</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button id="menu-toggle" class="btn ghost" title="Toggle problems" style="padding:6px 10px">☰</button>
+      <a href="index.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <nav class="topbar-nav" style="display:flex;gap:8px;margin-left:10px">
+        <a href="dashboard.html" id="nav-dashboard" class="ghost-link hidden">Dashboard</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <span id="question-count"></span>
+      <button id="add-question-btn" class="btn primary" style="padding:6px 12px">+ Add Question</button>
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="container" id="container">
+    <aside class="sidebar hidden" id="sidebar">
+      <div class="sidebar-header">
+        <h2>Problems</h2>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="sort-select" title="Sort">
+            <option value="recent">Recent</option>
+            <option value="title">Title A-Z</option>
+            <option value="difficulty">Difficulty</option>
+          </select>
+          <select id="difficulty-filter" title="Filter difficulty">
+            <option value="all">All</option>
+            <option value="Easy">Easy</option>
+            <option value="Medium">Medium</option>
+            <option value="Hard">Hard</option>
+          </select>
+        </div>
+      </div>
+      <div class="sidebar-controls" style="padding:8px;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+        <input id="search-input" placeholder="Search title/tag..." style="flex:1;min-width:120px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">
+        <select id="tag-filter" style="flex:1;min-width:110px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px"><option value="all">All tags</option></select>
+      </div>
+      <div id="question-list" class="question-list"></div>
+
+    </aside>
+    <div id="sidebar-resizer" class="resizer vertical hidden"></div>
+
+    <main class="main" id="main">
+      <section class="problem-pane" id="problem-pane" style="flex:1.1">
+        <div class="problem-tabs">
+          <button class="ptab active" data-ptab="desc">Description</button>
+          <button class="ptab" data-ptab="submissions">Submissions</button>
+        </div>
+        <div id="ptab-desc" class="ptab-panel active">
+          <div id="problem-view">
+            <div class="empty-state">
+              <h2>Select a problem</h2>
+              <p>Choose a question from the left. Write code on the right, hit <strong>Run</strong> for visible tests or <strong>Submit</strong> for all tests.</p>
+            </div>
+          </div>
+        </div>
+        <div id="ptab-submissions" class="ptab-panel">
+          <div class="submissions-header">
+            <span>Submission History</span>
+            <div style="display:flex;gap:6px">
+              <button id="export-history-btn" class="btn ghost" style="padding:4px 8px;font-size:11px">Export JSON</button>
+              <button id="clear-history-btn" class="btn ghost" style="padding:4px 8px;font-size:11px">Clear</button>
+            </div>
+          </div>
+          <div id="history-list" class="history-list"></div>
+          <div id="history-detail" class="history-detail"></div>
+        </div>
+      </section>
+
+      <div id="main-resizer" class="resizer vertical"></div>
+
+      <section class="editor-pane" id="editor-pane" style="flex:1">
+        <div class="editor-header">
+          <div class="editor-header-left">
+            <label for="language-select">Language</label>
+            <select id="language-select">
+              <option value="cpp" selected>C++</option>
+              <option value="javascript">JavaScript</option>
+              <option value="python">Python</option>
+            </select>
+            <button id="format-btn" class="btn ghost" title="Auto-format (keeps indent)">Format</button>
+            <button id="reset-btn" class="btn ghost" title="Reset to starter code">Reset</button>
+          </div>
+          <div class="editor-actions">
+            <button id="run-btn" class="btn secondary">Run</button>
+            <button id="submit-btn" class="btn primary">Submit</button>
+          </div>
+        </div>
+        <div id="editor-top" class="editor-top">
+          <textarea id="code-editor" spellcheck="false" placeholder="Select a problem to load starter code..."></textarea>
+        </div>
+        <div id="editor-resizer" class="resizer horizontal"></div>
+        <div id="editor-bottom" class="editor-bottom">
+          <div class="status-bar">
+            <span id="status-text">Ready</span>
+            <span id="last-run-meta"></span>
+          </div>
+          <div id="test-results" class="test-results"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Add Question Modal -->
+  <div id="add-modal" class="modal hidden">
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>Add New Question</h2>
+        <button id="modal-close" class="btn ghost" style="padding:4px 8px">✕</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="json">Raw JSON</button>
+        <button class="tab-btn" data-tab="form">Guided Form</button>
+        <span class="modal-hint">Past output from agent or fill form — saves to <code>questions/&lt;id&gt;.json</code></span>
+      </div>
+      <!-- JSON tab -->
+      <div class="tab-panel active" id="tab-json">
+        <div class="modal-actions-row">
+          <button id="load-template-btn" class="btn ghost">Load Template</button>
+          <label class="btn ghost" style="cursor:pointer">Import .json<input type="file" id="import-file" accept=".json" hidden></label>
+          <button id="validate-btn" class="btn secondary">Validate</button>
+        </div>
+        <textarea id="new-question-json" spellcheck="false" placeholder='Paste JSON here, e.g. {"id":"my-question", ...}'></textarea>
+        <div id="json-error" class="form-error hidden"></div>
+      </div>
+      <!-- Form tab -->
+      <div class="tab-panel" id="tab-form">
+        <div class="form-grid">
+          <label>Slug ID <span class="req">*</span><input id="f-id" placeholder="e.g. two-sum (a-z0-9-)"></label>
+          <label>Title <span class="req">*</span><input id="f-title" placeholder="Two Sum"></label>
+          <label>Difficulty <span class="req">*</span>
+            <select id="f-diff"><option>Easy</option><option>Medium</option><option>Hard</option></select>
+          </label>
+          <label>Tags (comma separated)<input id="f-tags" placeholder="Array, Hash Map"></label>
+          <label>Function (JS) <span class="req">*</span><input id="f-fn" placeholder="twoSum"></label>
+          <label>Function (Python)<input id="f-pyfn" placeholder="two_sum (optional)"></label>
+          <label>Params (comma) <span class="req">*</span><input id="f-params" placeholder="nums, target"></label>
+          <label class="full">Problem Statement (HTML allowed) <span class="req">*</span><textarea id="f-statement" rows="3" placeholder="Given nums..."></textarea></label>
+          <label class="full">Constraints (one per line)<textarea id="f-constraints" rows="2" placeholder="2 <= nums.length <= 10^4"></textarea></label>
+          <label class="full">Examples JSON array<textarea id="f-examples" rows="3" placeholder='[{"input":"nums=[2,7,11,15], target=9","output":"[0,1]","explanation":"..."}]'></textarea></label>
+          <label class="full">Starter JS <span class="req">*</span><textarea id="f-starter-js" rows="3" placeholder="function twoSum(nums, target) { }"></textarea></label>
+          <label class="full">Starter Python<textarea id="f-starter-py" rows="3" placeholder="def two_sum(nums, target): pass"></textarea></label>
+          <label class="full">Visible Tests JSON <span class="req">*</span><textarea id="f-visible" rows="4" placeholder='[{"id":"v1","input":{"nums":[2,7,11,15],"target":9},"expectedOutput":[0,1]}]'></textarea></label>
+          <label class="full">Hidden Tests JSON <span class="req">*</span><textarea id="f-hidden" rows="4" placeholder='[{"id":"h1","input":{"nums":[3,3],"target":6},"expectedOutput":[0,1]}]'></textarea></label>
+        </div>
+        <button id="form-to-json-btn" class="btn secondary" style="margin-top:10px;width:100%">Generate JSON → Raw tab</button>
+        <div id="form-error" class="form-error hidden"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="modal-cancel" class="btn ghost">Cancel</button>
+        <button id="save-question-btn" class="btn primary">Save to questions/</button>
+      </div>
+      <div class="modal-note">Also works by dropping a file into <code>/questions</code> manually — this UI writes the same file via <code>POST /api/questions</code>.</div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

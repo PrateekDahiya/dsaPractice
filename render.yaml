@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: dsa-practice
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: dsaQuestions
+          property: host
+        # or set manually in dashboard: mysql-2655d9d0-....aivencloud.com
+      - key: DB_PORT
+        value: 17886
+      - key: DB_NAME
+        value: dsaQuestions
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL
+        value: true
+# If using Dockerfile instead, set:
+#  - type: web
+#    name: dsa-practice
+#    env: docker
+#    dockerfilePath: ./Dockerfile

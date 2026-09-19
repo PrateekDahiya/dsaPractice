@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — DSA Practice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="index.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="dashboard.html" class="ghost-link" style="border-color:var(--accent);color:var(--text)">Dashboard</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="index.html" class="ghost-link">Problems</a>
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="dash-wrap" id="dash-root">
+    <div id="dash-loading" style="color:var(--muted);padding:40px;text-align:center">Loading dashboard...</div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const $ = s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    function clearAuth(){ localStorage.removeItem("token"); localStorage.removeItem("user"); }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    function updateTopbar(user){
+      const a=$("#auth-area");
+      if(!a) return;
+      if(user){
+        a.innerHTML=`<span style="font-weight:600;font-size:13px">${esc(user.username)}</span><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
+        document.getElementById("logout-btn")?.addEventListener("click",()=>{ clearAuth(); location.href="login.html"; });
+      } else {
+        a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
+      }
+    }
+    function levelClass(count){
+      if(count===0) return "";
+      if(count===1) return "l1";
+      if(count===2) return "l2";
+      if(count===3) return "l3";
+      if(count>=4 && count<6) return "l4";
+      return "l5";
+    }
+    async function fetchDashboard(userId){
+      const t=getToken();
+      let url;
+      if(userId) url=`/api/users/${encodeURIComponent(userId)}/dashboard`;
+      else url=`/api/users/me/dashboard`;
+      const headers=authHeaders({});
+      const res=await fetch(url,{ headers });
+      if(res.status===401) throw new Error("Unauthorized — please login");
+      if(!res.ok){ const d=await res.json().catch(()=>({})); throw new Error(d.error||"Failed to load dashboard"); }
+      return await res.json();
+    }
+    async function fetchQuestionsSummaries(){
+      const r=await fetch("/api/questions");
+      if(!r.ok) return [];
+      return await r.json();
+    }
+    function renderRing(solved,total){
+      const pct = total? Math.round(solved/total*100):0;
+      const r=60, c=2*Math.PI*r;
+      const offset = c * (1 - pct/100);
+      return `<div class="ring">
+        <svg width="140" height="140" viewBox="0 0 140 140">
+          <circle cx="70" cy="70" r="${r}" fill="none" stroke="#1e222c" stroke-width="12"/>
+          <circle cx="70" cy="70" r="${r}" fill="none" stroke="#ffa116" stroke-width="12" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
+        </svg>
+        <div class="ring-center"><span class="big">${solved}/${total}</span><span class="small">${pct}% solved</span></div>
+      </div>`;
+    }
+
+    async function init(){
+      const params=new URLSearchParams(location.search);
+      let viewId = params.get("id") || params.get("user") || params.get("userId");
+      // also support hash #id or /u/:id via search
+      if(!viewId && location.hash && /^\d+$/.test(location.hash.slice(1))) viewId=location.hash.slice(1);
+      const me = getUser();
+      const token=getToken();
+      // verify token
+      if(token){
+        try{ const r=await fetch("/api/me",{ headers:{ Authorization:"Bearer "+token } }); if(r.ok){ const u=await r.json(); localStorage.setItem("user",JSON.stringify(u)); updateTopbar(u);} else { clearAuth(); updateTopbar(null);} }catch{ updateTopbar(me); }
+      } else updateTopbar(null);
+
+      let isOther=false;
+      let targetId=null;
+      if(viewId){
+        targetId=viewId;
+        isOther = !me || String(me.id)!==String(viewId);
+      } else {
+        if(!token){ document.getElementById("dash-root").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><h2 style="color:var(--text)">Login required</h2><p>Please <a href="login.html" style="color:var(--accent)">Login</a> to view your dashboard.</p><p style="margin-top:10px">Or view <a href="leaderboard.html" style="color:var(--accent)">Leaderboard</a></p></div>`; return; }
+        targetId=null; // me
+      }
+      // if other user but not logged in, still allow viewing if server permits anon? Our /api/users/:id/dashboard requires DB but not necessarily auth for numeric id, but we try with auth if present
+      let data;
+      try{
+        data=await fetchDashboard(targetId);
+      }catch(e){
+        document.getElementById("dash-root").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><h2 style="color:var(--text)">Error</h2><p>${esc(e.message)}</p></div>`;
+        return;
+      }
+      const stats=data.stats;
+      const solvedIds=new Set(data.solvedIds||[]);
+      // set read-only flag for history rendering elsewhere
+      window.__DASHBOARD_READONLY = isOther;
+      const userLabel = isOther ? `User #${esc(targetId)}` : (me? esc(me.username):"You");
+      const questions = await fetchQuestionsSummaries();
+      const unsolved = questions.filter(q=>!solvedIds.has(q.id));
+
+      const diff = stats.byDifficulty || { Easy:{solved:0,total:0}, Medium:{solved:0,total:0}, Hard:{solved:0,total:0} };
+      function diffPct(d){ const t=d.total||0, s=d.solved||0; return t? Math.round(s/t*100):0; }
+
+      const streaks = stats.streaks || { current:0, longest:0, totalActive:0, calendar:[] };
+
+      const recent = stats.recent || [];
+
+      const cal = streaks.calendar || [];
+      // color intensity by count using levelClass
+      const calHtml = cal.map(cell=> `<div class="cal-cell ${levelClass(cell.count)}" title="${cell.date}: ${cell.count} solve${cell.count!==1?'s':''}"></div>`).join("");
+
+      const recentHtml = recent.length? `<ul>${recent.map(r=>`<li><a href="index.html#${esc(r.questionId)}">${esc(r.title)}</a><span style="display:flex;gap:6px;align-items:center"><span class="badge ${esc(r.difficulty)}">${esc(r.difficulty)}</span><span style="color:var(--muted);font-size:11px">${new Date(r.solvedAt).toLocaleDateString()}</span></span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No solves yet — start solving!</div>`;
+
+      const unsolvedHtml = unsolved.length? `<ul>${unsolved.slice(0,12).map(q=>`<li><a href="index.html#${esc(q.id)}">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`).join("")}${unsolved.length>12? `<li style="justify-content:center;color:var(--muted)">+${unsolved.length-12} more</li>`:""}</ul>` : `<div style="color:var(--muted);font-size:13px">All caught up! 🎉</div>`;
+
+      document.getElementById("dash-root").innerHTML=`
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+          <h1 style="font-size:22px">${isOther? `Dashboard — ${userLabel}` : `Dashboard`}${isOther? ' <span style="color:var(--muted);font-size:13px;font-weight:400">(read-only)</span>':''}</h1>
+          <span style="color:var(--muted);font-size:13px">${stats.solved} solved · ${stats.total} total</span>
+        </div>
+        <div class="dash-grid">
+          <div class="ring-card">
+            ${renderRing(stats.solved, stats.total)}
+            <div class="diff-breakdown">
+              ${["Easy","Medium","Hard"].map(k=>{
+                const d=diff[k]||{solved:0,total:0};
+                const pct=diffPct(d);
+                const cls=k.toLowerCase();
+                return `<div class="diff-row"><span style="min-width:60px">${k}</span><div class="diff-bar ${cls}"><span style="width:${pct}%"></span></div><span style="min-width:60px;text-align:right">${d.solved}/${d.total}</span></div>`;
+              }).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="streak-grid">
+              <div class="streak-card"><div class="num">${streaks.current}</div><div class="lbl">Current streak</div></div>
+              <div class="streak-card"><div class="num">${streaks.longest}</div><div class="lbl">Longest streak</div></div>
+              <div class="streak-card"><div class="num">${streaks.totalActive}</div><div class="lbl">Active days</div></div>
+            </div>
+            <div class="heatmap">
+              <h3>Activity — last 365 days</h3>
+              <div class="cal-grid">${calHtml}</div>
+              <div style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:11px;color:var(--muted)">Less <span style="display:flex;gap:3px">${[0,1,2,3,5].map(c=>`<span class="cal-cell ${levelClass(c)}" style="width:12px;height:12px"></span>`).join("")}</span> More</div>
+            </div>
+          </div>
+        </div>
+        <div class="dash-lists">
+          <div class="list-card"><h3>Recently solved</h3>${recentHtml}</div>
+          <div class="list-card"><h3>Unsolved</h3>${unsolvedHtml}</div>
+        </div>
+        ${isOther? `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Read-only view — code history hidden for privacy.</div>` : `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Your submissions are private and scoped per user. Code autosaves every 10s to DB with your token.</div>`}
+      `;
+    }
+    init();
+  </script>
+</body>
+</html>

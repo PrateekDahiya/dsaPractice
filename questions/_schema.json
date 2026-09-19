@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DSA Question",
+  "description": "Schema for adding a question. Drop a JSON file matching this schema into /questions and refresh the app.",
+  "type": "object",
+  "required": ["id", "title", "difficulty", "problemStatement", "functionName", "params", "starterCode", "visibleTestCases", "hiddenTestCases"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Slug, also filename. e.g. two-sum" },
+    "title": { "type": "string" },
+    "difficulty": { "type": "string", "enum": ["Easy", "Medium", "Hard"] },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "problemStatement": { "type": "string", "description": "Supports plain text and inline HTML (<code>, <em>, <ul>)" },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["input", "output"],
+        "properties": {
+          "input": { "type": "string" },
+          "output": { "type": "string" },
+          "explanation": { "type": "string" }
+        }
+      }
+    },
+    "functionName": { "type": "string", "description": "JS function name" },
+    "pythonFunctionName": { "type": "string", "description": "Python function name (snake_case). Defaults to functionName if omitted" },
+    "params": { "type": "array", "items": { "type": "string" }, "description": "Parameter names in order, keys for test case input" },
+    "starterCode": {
+      "type": "object",
+      "required": ["javascript"],
+      "properties": {
+        "javascript": { "type": "string" },
+        "python": { "type": "string" }
+      }
+    },
+    "visibleTestCases": {
+      "type": "array",
+      "description": "Run button executes these only",
+      "items": {
+        "type": "object",
+        "required": ["id", "input", "expectedOutput"],
+        "properties": {
+          "id": { "type": "string" },
+          "input": { "type": "object", "description": "Keys must match params" },
+          "expectedOutput": { "description": "Any JSON-serializable value" }
+        }
+      }
+    },
+    "hiddenTestCases": {
+      "type": "array",
+      "description": "Submit executes visible + hidden",
+      "items": {
+        "type": "object",
+        "required": ["id", "input", "expectedOutput"],
+        "properties": {
+          "id": { "type": "string" },
+          "input": { "type": "object" },
+          "expectedOutput": {}
+        }
+      }
+    }
+  },
+  "example": {
+    "id": "two-sum",
+    "title": "Two Sum",
+    "difficulty": "Easy",
+    "problemStatement": "Given nums and target...",
+    "functionName": "twoSum",
+    "params": ["nums", "target"],
+    "starterCode": { "javascript": "function twoSum(nums, target) {}", "python": "def two_sum(nums, target): pass" },
+    "visibleTestCases": [{ "id": "v1", "input": { "nums": [2,7,11,15], "target": 9 }, "expectedOutput": [0,1] }],
+    "hiddenTestCases": [{ "id": "h1", "input": { "nums": [3,3], "target": 6 }, "expectedOutput": [0,1] }]
+  }
+}

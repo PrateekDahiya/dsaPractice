@@ -1,0 +1,144 @@
+{
+  "id": "best-time-to-buy-and-sell-stock",
+  "title": "Best Time to Buy and Sell Stock",
+  "difficulty": "Easy",
+  "tags": [
+    "Array",
+    "Greedy"
+  ],
+  "problemStatement": "You are given an array <code>prices</code> where <code>prices[i]</code> is the price of a stock on day <code>i</code>. Choose exactly one day to buy the stock and a later day to sell it. Return the maximum profit you can achieve. If no profitable transaction is possible, return <code>0</code>.",
+  "constraints": [
+    "1 <= prices.length <= 10^5",
+    "0 <= prices[i] <= 10^4"
+  ],
+  "examples": [
+    {
+      "input": "prices = [7,1,5,3,6,4]",
+      "output": "5",
+      "explanation": "Buy on day 2 at price 1 and sell on day 5 at price 6, giving a profit of 5."
+    },
+    {
+      "input": "prices = [7,6,4,3,1]",
+      "output": "0",
+      "explanation": "The price keeps decreasing, so no profitable transaction is possible."
+    },
+    {
+      "input": "prices = [2,4,1,7]",
+      "output": "6",
+      "explanation": "Buy at price 1 and sell later at price 7, giving a maximum profit of 6."
+    }
+  ],
+  "functionName": "maxProfit",
+  "pythonFunctionName": "max_profit",
+  "cppFunctionName": "maxProfit",
+  "params": [
+    "prices"
+  ],
+  "starterCode": {
+    "javascript": "function maxProfit(prices) {\n  // Write your code here\n}",
+    "python": "def max_profit(prices):\n    # Write your code here\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint maxProfit(vector<int>& prices) {\n    // Write your code here\n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": {
+        "prices": [
+          7,
+          1,
+          5,
+          3,
+          6,
+          4
+        ]
+      },
+      "expectedOutput": 5
+    },
+    {
+      "id": "v2",
+      "input": {
+        "prices": [
+          7,
+          6,
+          4,
+          3,
+          1
+        ]
+      },
+      "expectedOutput": 0
+    },
+    {
+      "id": "v3",
+      "input": {
+        "prices": [
+          2,
+          4,
+          1,
+          7
+        ]
+      },
+      "expectedOutput": 6
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": {
+        "prices": [
+          1
+        ]
+      },
+      "expectedOutput": 0
+    },
+    {
+      "id": "h2",
+      "input": {
+        "prices": [
+          1,
+          2
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "h3",
+      "input": {
+        "prices": [
+          2,
+          1,
+          2,
+          0,
+          1
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "h4",
+      "input": {
+        "prices": [
+          3,
+          3,
+          3,
+          3
+        ]
+      },
+      "expectedOutput": 0
+    },
+    {
+      "id": "h5",
+      "input": {
+        "prices": [
+          10,
+          2,
+          8,
+          1,
+          9,
+          4,
+          12
+        ]
+      },
+      "expectedOutput": 11
+    }
+  ]
+}

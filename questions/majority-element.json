@@ -1,0 +1,154 @@
+{
+  "id": "majority-element",
+  "title": "Majority Element",
+  "difficulty": "Easy",
+  "tags": [
+    "Array",
+    "Hash Map",
+    "Boyer-Moore Voting"
+  ],
+  "problemStatement": "Given an integer array <code>nums</code> of size <code>n</code>, return the element that appears more than <code>n / 2</code> times. You may assume that a majority element always exists in the array.",
+  "constraints": [
+    "1 <= nums.length <= 5 * 10^4",
+    "-10^9 <= nums[i] <= 10^9",
+    "A majority element always exists in nums"
+  ],
+  "examples": [
+    {
+      "input": "nums = [3,2,3]",
+      "output": "3",
+      "explanation": "3 appears twice out of 3 elements, which is more than n/2."
+    },
+    {
+      "input": "nums = [2,2,1,1,1,2,2]",
+      "output": "2",
+      "explanation": "2 appears four times out of seven elements, which is more than n/2."
+    },
+    {
+      "input": "nums = [1]",
+      "output": "1",
+      "explanation": "The only element is the majority element."
+    }
+  ],
+  "functionName": "majorityElement",
+  "pythonFunctionName": "majority_element",
+  "cppFunctionName": "majorityElement",
+  "params": [
+    "nums"
+  ],
+  "starterCode": {
+    "javascript": "function majorityElement(nums) {\n  // Write your code here\n}",
+    "python": "def majority_element(nums):\n    # Write your code here\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint majorityElement(vector<int>& nums) {\n    // Write your code here\n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": {
+        "nums": [
+          3,
+          2,
+          3
+        ]
+      },
+      "expectedOutput": 3
+    },
+    {
+      "id": "v2",
+      "input": {
+        "nums": [
+          2,
+          2,
+          1,
+          1,
+          1,
+          2,
+          2
+        ]
+      },
+      "expectedOutput": 2
+    },
+    {
+      "id": "v3",
+      "input": {
+        "nums": [
+          1
+        ]
+      },
+      "expectedOutput": 1
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": {
+        "nums": [
+          5,
+          5,
+          5,
+          2,
+          2
+        ]
+      },
+      "expectedOutput": 5
+    },
+    {
+      "id": "h2",
+      "input": {
+        "nums": [
+          1,
+          1,
+          2,
+          2,
+          1
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "h3",
+      "input": {
+        "nums": [
+          -1,
+          -1,
+          -1,
+          2,
+          2
+        ]
+      },
+      "expectedOutput": -1
+    },
+    {
+      "id": "h4",
+      "input": {
+        "nums": [
+          7,
+          7,
+          3,
+          7,
+          3,
+          7,
+          7
+        ]
+      },
+      "expectedOutput": 7
+    },
+    {
+      "id": "h5",
+      "input": {
+        "nums": [
+          10,
+          10,
+          20,
+          10,
+          30,
+          10,
+          10,
+          40,
+          10
+        ]
+      },
+      "expectedOutput": 10
+    }
+  ]
+}

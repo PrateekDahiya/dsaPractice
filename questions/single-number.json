@@ -1,0 +1,144 @@
+{
+  "id": "single-number",
+  "title": "Find the Element That Appears Once",
+  "difficulty": "Easy",
+  "tags": [
+    "Array",
+    "Bit Manipulation",
+    "XOR"
+  ],
+  "problemStatement": "Given an integer array <code>nums</code> where every element appears exactly twice except for one element, return the element that appears only once. You must solve the problem in <strong>O(n)</strong> time and <strong>O(1)</strong> extra space.",
+  "constraints": [
+    "1 <= nums.length <= 10^5",
+    "-10^5 <= nums[i] <= 10^5",
+    "Every element appears exactly twice except for one element, which appears exactly once"
+  ],
+  "examples": [
+    {
+      "input": "nums = [2,2,1]",
+      "output": "1",
+      "explanation": "The number 2 appears twice, while 1 appears only once."
+    },
+    {
+      "input": "nums = [4,1,2,1,2]",
+      "output": "4",
+      "explanation": "The numbers 1 and 2 appear twice, while 4 appears only once."
+    },
+    {
+      "input": "nums = [1]",
+      "output": "1",
+      "explanation": "The only element appears once."
+    }
+  ],
+  "functionName": "singleNumber",
+  "pythonFunctionName": "single_number",
+  "cppFunctionName": "singleNumber",
+  "params": [
+    "nums"
+  ],
+  "starterCode": {
+    "javascript": "function singleNumber(nums) {\n  // Write your code here\n}",
+    "python": "def single_number(nums):\n    # Write your code here\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint singleNumber(vector<int>& nums) {\n    // Write your code here\n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": {
+        "nums": [
+          2,
+          2,
+          1
+        ]
+      },
+      "expectedOutput": 1
+    },
+    {
+      "id": "v2",
+      "input": {
+        "nums": [
+          4,
+          1,
+          2,
+          1,
+          2
+        ]
+      },
+      "expectedOutput": 4
+    },
+    {
+      "id": "v3",
+      "input": {
+        "nums": [
+          1
+        ]
+      },
+      "expectedOutput": 1
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": {
+        "nums": [
+          7,
+          3,
+          7
+        ]
+      },
+      "expectedOutput": 3
+    },
+    {
+      "id": "h2",
+      "input": {
+        "nums": [
+          -1,
+          -1,
+          -2
+        ]
+      },
+      "expectedOutput": -2
+    },
+    {
+      "id": "h3",
+      "input": {
+        "nums": [
+          10,
+          20,
+          30,
+          20,
+          10
+        ]
+      },
+      "expectedOutput": 30
+    },
+    {
+      "id": "h4",
+      "input": {
+        "nums": [
+          5,
+          4,
+          5,
+          4,
+          9,
+          8,
+          8
+        ]
+      },
+      "expectedOutput": 9
+    },
+    {
+      "id": "h5",
+      "input": {
+        "nums": [
+          -100000,
+          50000,
+          -100000,
+          50000,
+          12345
+        ]
+      },
+      "expectedOutput": 12345
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "id": "reverse-string",
+  "title": "Reverse String",
+  "difficulty": "Easy",
+  "tags": ["Two Pointers", "String"],
+  "problemStatement": "Write a function that reverses a string. The input string is given as an array of characters <code>s</code>.\n\nYou must do this by modifying the input array <strong>in-place</strong> with <code>O(1)</code> extra memory.",
+  "constraints": [
+    "1 <= s.length <= 10^5",
+    "s[i] is a printable ascii character."
+  ],
+  "examples": [
+    {
+      "input": "s = [\"h\",\"e\",\"l\",\"l\",\"o\"]",
+      "output": "[\"o\",\"l\",\"l\",\"e\",\"h\"]",
+      "explanation": "Reverse the array in place."
+    },
+    {
+      "input": "s = [\"H\",\"a\",\"n\",\"n\",\"a\",\"h\"]",
+      "output": "[\"h\",\"a\",\"n\",\"n\",\"a\",\"H\"]",
+      "explanation": ""
+    }
+  ],
+  "functionName": "reverseString",
+  "pythonFunctionName": "reverse_string",
+  "params": ["s"],
+  "cppFunctionName": "reverseString",
+  "starterCode": {
+    "javascript": "function reverseString(s) {\n    // Modify s in-place and return it\n    // s is an array of characters, e.g. ['h','e','l','l','o']\n    \n}",
+    "python": "def reverse_string(s):\n    # Modify s in-place and return it\n    # s is a list of characters\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nvoid reverseString(vector<char>& s) {\n    // Modify s in-place\n    \n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": { "s": ["h", "e", "l", "l", "o"] },
+      "expectedOutput": ["o", "l", "l", "e", "h"]
+    },
+    {
+      "id": "v2",
+      "input": { "s": ["H", "a", "n", "n", "a", "h"] },
+      "expectedOutput": ["h", "a", "n", "n", "a", "H"]
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": { "s": ["a"] },
+      "expectedOutput": ["a"]
+    },
+    {
+      "id": "h2",
+      "input": { "s": ["a", "b"] },
+      "expectedOutput": ["b", "a"]
+    }
+  ]
+}

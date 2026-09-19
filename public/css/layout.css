@@ -1,0 +1,10 @@
+/* layout.css — sidebar, main, problem-pane, resizers */
+.container { display: flex; flex: 1; min-height: 0; position: relative; }
+.sidebar { width: 280px; min-width: 200px; max-width: 420px; border-right: 1px solid var(--border); background: #13151b; display: flex; flex-direction: column; flex-shrink: 0; transition: transform 0.2s ease, width 0.2s ease, opacity 0.2s ease; overflow: hidden; }
+.sidebar.hidden { width: 0; min-width: 0; max-width: 0; opacity: 0; border-right: none; transform: translateX(-100%); pointer-events: none; }
+.sidebar-overlay { display: none; }
+.main { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.problem-pane { flex: 1.1; display: flex; flex-direction: column; min-width: 260px; border-right: 1px solid var(--border); background: #15181f; overflow: hidden; }
+.resizer.vertical { width: 6px; cursor: col-resize; background: transparent; }
+.resizer.horizontal { height: 6px; cursor: row-resize; }
+.resizer:hover, .resizer.dragging { background: rgba(255,161,22,0.15); }

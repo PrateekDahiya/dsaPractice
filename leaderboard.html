@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaderboard — DSA Practice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="index.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="leaderboard.html" class="ghost-link" style="border-color:var(--accent);color:var(--text)">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="index.html" class="ghost-link">Problems</a>
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="lb-wrap">
+    <h1 style="font-size:22px;margin-bottom:6px">Leaderboard</h1>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">Rank by solved problems · Filter by time window</p>
+    <div class="filter-tabs" id="filter-tabs">
+      <button data-filter="all" class="active">All time</button>
+      <button data-filter="weekly">Weekly</button>
+      <button data-filter="monthly">Monthly</button>
+    </div>
+    <div id="lb-loading" style="color:var(--muted);padding:20px;text-align:center">Loading...</div>
+    <table class="lb-table hidden" id="lb-table">
+      <thead>
+        <tr>
+          <th style="width:70px">Rank</th>
+          <th>User</th>
+          <th style="width:90px">Solved</th>
+          <th style="width:100px">Streak</th>
+          <th style="width:140px">Last solve</th>
+        </tr>
+      </thead>
+      <tbody id="lb-body"></tbody>
+    </table>
+    <div id="lb-empty" class="hidden" style="color:var(--muted);padding:20px;text-align:center">No users yet.</div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    function clearAuth(){ localStorage.removeItem("token"); localStorage.removeItem("user"); }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    function updateTopbar(){
+      const user=getUser();
+      const a=$("#auth-area");
+      if(!a) return;
+      if(user && getToken()){
+        a.innerHTML=`<a href="dashboard.html" style="font-weight:600;font-size:13px;color:var(--text);text-decoration:none">${esc(user.username)}</a><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
+        document.getElementById("logout-btn")?.addEventListener("click",()=>{ clearAuth(); location.reload(); });
+      } else {
+        a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
+      }
+    }
+    let currentFilter="all";
+    async function fetchLeaderboard(filter){
+      const headers=authHeaders({});
+      const res=await fetch(`/api/leaderboard?filter=${encodeURIComponent(filter)}&limit=50`, { headers });
+      if(!res.ok){ const d=await res.json().catch(()=>({})); throw new Error(d.error||"Failed to load leaderboard"); }
+      return await res.json();
+    }
+    // optional: fetch streak per user if needed (best effort, parallel with limit)
+    async function enrichWithStreak(rows){
+      // fetch stats for each user to get current streak — do limited concurrency
+      const t=getToken();
+      // only enrich top 10 to avoid flood
+      const top = rows.slice(0,10);
+      const map={};
+      await Promise.all(top.map(async u=>{
+        try{
+          const r=await fetch(`/api/users/${u.id}/stats`, { headers: authHeaders({}) });
+          if(r.ok){ const s=await r.json(); map[u.id]=s.streaks?.current ?? "-"; }
+        }catch{}
+      }));
+      return rows.map(r=>({ ...r, streak: map[r.id] ?? "-" }));
+    }
+    function formatLast(d){
+      if(!d) return "-";
+      const dt=new Date(d);
+      const now=new Date();
+      const diffMs=now-dt;
+      const diffDays=Math.floor(diffMs/86400000);
+      if(diffDays===0) return "today " + dt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      if(diffDays===1) return "yesterday";
+      if(diffDays<7) return diffDays+"d ago";
+      return dt.toLocaleDateString();
+    }
+    async function render(filter){
+      currentFilter=filter;
+      document.querySelectorAll("#filter-tabs button").forEach(b=> b.classList.toggle("active", b.dataset.filter===filter));
+      const loading=$("#lb-loading"); const table=$("#lb-table"); const body=$("#lb-body"); const empty=$("#lb-empty");
+      loading.classList.remove("hidden"); table.classList.add("hidden"); empty.classList.add("hidden");
+      try{
+        let rows=await fetchLeaderboard(filter);
+        rows=await enrichWithStreak(rows);
+        loading.classList.add("hidden");
+        if(!rows.length){ empty.classList.remove("hidden"); return; }
+        table.classList.remove("hidden");
+        body.innerHTML=rows.map((u,i)=>{
+          const rank=i+1;
+          const badgeClass = rank===1?"gold": rank===2?"gold": rank===3?"gold":"";
+          // use rank badge with gold for top 3
+          return `<tr>
+            <td><span class="rank-badge ${rank<=3?'gold':''}">${rank}</span></td>
+            <td class="lb-user"><a href="dashboard.html?id=${u.id}">${esc(u.username)}</a></td>
+            <td>${u.solvedCount}</td>
+            <td>${esc(String(u.streak ?? "-"))}</td>
+            <td style="color:var(--muted);font-size:12px">${esc(formatLast(u.lastSolvedAt))}</td>
+          </tr>`;
+        }).join("");
+      }catch(e){
+        loading.textContent="Error: "+e.message;
+        loading.classList.remove("hidden");
+      }
+    }
+    document.querySelectorAll("#filter-tabs button").forEach(btn=>{
+      btn.addEventListener("click",()=> render(btn.dataset.filter));
+    });
+    (async()=>{
+      updateTopbar();
+      // verify token
+      const t=getToken();
+      if(t){
+        try{ const r=await fetch("/api/me",{ headers:{ Authorization:"Bearer "+t }}); if(!r.ok) clearAuth(); else { const u=await r.json(); localStorage.setItem("user",JSON.stringify(u)); updateTopbar(); } }catch{}
+      }
+      render("all");
+    })();
+  </script>
+</body>
+</html>

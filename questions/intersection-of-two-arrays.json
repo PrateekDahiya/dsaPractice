@@ -1,0 +1,208 @@
+{
+  "id": "intersection-of-two-arrays",
+  "title": "Intersection of Two Arrays",
+  "difficulty": "Easy",
+  "tags": [
+    "Array",
+    "Hash Set",
+    "Two Pointers"
+  ],
+  "problemStatement": "Given two integer arrays <code>nums1</code> and <code>nums2</code>, return an array containing their <strong>distinct common elements</strong>. Each element in the result must appear only once. The order of the result does not matter.",
+  "constraints": [
+    "1 <= nums1.length, nums2.length <= 10^5",
+    "-10^9 <= nums1[i], nums2[i] <= 10^9"
+  ],
+  "examples": [
+    {
+      "input": "nums1 = [1,2,2,1], nums2 = [2,2]",
+      "output": "[2]",
+      "explanation": "The only distinct element present in both arrays is 2."
+    },
+    {
+      "input": "nums1 = [4,9,5], nums2 = [9,4,9,8,4]",
+      "output": "[4,9]",
+      "explanation": "Both 4 and 9 occur in both arrays. Each appears only once in the result."
+    },
+    {
+      "input": "nums1 = [1,2,3], nums2 = [4,5,6]",
+      "output": "[]",
+      "explanation": "There are no elements common to both arrays."
+    }
+  ],
+  "functionName": "intersection",
+  "pythonFunctionName": "intersection",
+  "cppFunctionName": "intersection",
+  "params": [
+    "nums1",
+    "nums2"
+  ],
+  "starterCode": {
+    "javascript": "function intersection(nums1, nums2) {\n  // Write your code here\n}",
+    "python": "def intersection(nums1, nums2):\n    # Write your code here\n    pass",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nvector<int> intersection(vector<int>& nums1, vector<int>& nums2) {\n    // Write your code here\n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "v1",
+      "input": {
+        "nums1": [
+          1,
+          2,
+          2,
+          1
+        ],
+        "nums2": [
+          2,
+          2
+        ]
+      },
+      "expectedOutput": [
+        2
+      ]
+    },
+    {
+      "id": "v2",
+      "input": {
+        "nums1": [
+          4,
+          9,
+          5
+        ],
+        "nums2": [
+          9,
+          4,
+          9,
+          8,
+          4
+        ]
+      },
+      "expectedOutput": [
+        4,
+        9
+      ]
+    },
+    {
+      "id": "v3",
+      "input": {
+        "nums1": [
+          1,
+          2,
+          3
+        ],
+        "nums2": [
+          4,
+          5,
+          6
+        ]
+      },
+      "expectedOutput": []
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "h1",
+      "input": {
+        "nums1": [
+          1,
+          1,
+          1,
+          2,
+          2
+        ],
+        "nums2": [
+          1,
+          1,
+          2,
+          2,
+          2
+        ]
+      },
+      "expectedOutput": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "h2",
+      "input": {
+        "nums1": [
+          -1,
+          -2,
+          -3
+        ],
+        "nums2": [
+          -3,
+          -2,
+          -4
+        ]
+      },
+      "expectedOutput": [
+        -3,
+        -2
+      ]
+    },
+    {
+      "id": "h3",
+      "input": {
+        "nums1": [
+          10,
+          20,
+          30,
+          40
+        ],
+        "nums2": [
+          20,
+          40,
+          60,
+          80
+        ]
+      },
+      "expectedOutput": [
+        20,
+        40
+      ]
+    },
+    {
+      "id": "h4",
+      "input": {
+        "nums1": [
+          5
+        ],
+        "nums2": [
+          5,
+          5,
+          5
+        ]
+      },
+      "expectedOutput": [
+        5
+      ]
+    },
+    {
+      "id": "h5",
+      "input": {
+        "nums1": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "nums2": [
+          5,
+          4,
+          3,
+          2,
+          1
+        ]
+      },
+      "expectedOutput": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  ]
+}

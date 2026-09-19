@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — DSA Practice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="index.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="register.html" class="btn primary" style="padding:6px 12px">Register</a>
+    </div>
+  </header>
+  <div class="auth-wrap">
+    <form class="auth-card" id="login-form" autocomplete="on">
+      <h1>Welcome back</h1>
+      <p class="muted">Login to sync code, track streaks and appear on leaderboard.</p>
+      <label>Username
+        <input id="username" name="username" placeholder="your username" required pattern="^[a-z0-9_]{3,20}$" title="3-20 chars a-z0-9_" />
+      </label>
+      <label>Password
+        <input id="password" name="password" type="password" placeholder="••••••••" required minlength="6" />
+      </label>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:8px;padding:10px">Login</button>
+      <div id="auth-error" class="auth-error hidden"></div>
+      <p style="margin-top:12px;font-size:13px;color:var(--muted);text-align:center">No account? <a href="register.html" style="color:var(--accent)">Register</a></p>
+    </form>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script>
+    const $ = s=>document.querySelector(s);
+    const toastEl = $("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    document.getElementById("login-form").addEventListener("submit", async (e)=>{
+      e.preventDefault();
+      const username = $("#username").value.trim();
+      const password = $("#password").value;
+      const errEl = $("#auth-error");
+      errEl.classList.add("hidden");
+      const btn = e.target.querySelector("button[type=submit]");
+      btn.disabled=true; btn.textContent="Logging in...";
+      try{
+        const res = await fetch("/api/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ username, password }) });
+        const data = await res.json().catch(()=>({}));
+        if(!res.ok) throw new Error(data.error || "Login failed");
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        toast("Logged in as " + data.user.username);
+        setTimeout(()=> location.href = "index.html", 600);
+      }catch(err){
+        errEl.textContent = err.message;
+        errEl.classList.remove("hidden");
+      } finally { btn.disabled=false; btn.textContent="Login"; }
+    });
+    // if already logged in, check token
+    (async()=>{
+      const t=localStorage.getItem("token");
+      if(!t) return;
+      try{
+        const r=await fetch("/api/me",{ headers:{ Authorization:"Bearer "+t } });
+        if(r.ok) location.href="index.html";
+      }catch{}
+    })();
+  </script>
+</body>
+</html>
