@@ -5,4 +5,6 @@ npm-debug.log
 tools
 *.log
 .env.local
-C:\mingw64
+.env
+mingw64
+
