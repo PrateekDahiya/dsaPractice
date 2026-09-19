@@ -29,15 +29,31 @@ function authHeaders(headers={}){
   if(t) h["Authorization"] = "Bearer " + t;
   return h;
 }
+const _apiCache = new Map(); // url -> {data, ts}
 async function apiFetch(url, opts={}){
   const headers = authHeaders(opts.headers||{});
   const res = await fetch(url, { ...opts, headers });
   if(res.status===401){
-    // token invalid -> clear and update topbar, but not force redirect unless on protected action
-    // we keep UI, caller may handle
     if(url.includes("/api/me")) clearAuth();
   }
   return res;
+}
+async function cachedApiFetch(url, ttl=15000){
+  const key = url;
+  const now = Date.now();
+  const entry = _apiCache.get(key);
+  if(entry && now - entry.ts < ttl && entry.data){
+    // return clone
+    return { ok: true, status: 200, json: async()=> JSON.parse(JSON.stringify(entry.data)), clone: true };
+  }
+  const res = await apiFetch(url);
+  if(!res.ok) throw new Error(`fetch ${url} failed ${res.status}`);
+  const data = await res.json();
+  _apiCache.set(key, { data: JSON.parse(JSON.stringify(data)), ts: now });
+  return { ok: true, status: 200, json: async()=> data };
+}
+function invalidateCache(prefix){
+  for(const k of _apiCache.keys()) if(k.startsWith(prefix)) _apiCache.delete(k);
 }
 function updateTopbar(user){
   const authArea = document.getElementById("auth-area");
@@ -151,9 +167,32 @@ async function refreshSolvedState(){
 
 async function fetchQuestions() {
   try {
+    // UI cache 15s: instant second load
+    try {
+      const cached = await cachedApiFetch("/api/questions", 15000);
+      questions = await cached.json();
+      // background revalidate after 2s
+      setTimeout(async () => {
+        try {
+          const fresh = await apiFetch("/api/questions");
+          if (fresh.ok) {
+            const data = await fresh.json();
+            _apiCache.set("/api/questions", { data: JSON.parse(JSON.stringify(data)), ts: Date.now() });
+            // only update if changed
+            if (JSON.stringify(data) !== JSON.stringify(questions)) {
+              questions = data;
+              populateTagFilter();
+              renderList();
+            }
+          }
+        } catch {}
+      }, 2000);
+      return;
+    } catch {}
     const res = await apiFetch("/api/questions");
     if (!res.ok) throw new Error("api failed");
     questions = await res.json();
+    _apiCache.set("/api/questions", { data: JSON.parse(JSON.stringify(questions)), ts: Date.now() });
   } catch (e) {
     console.warn("API not available, fallback to static probe", e);
     const ids = ["two-sum", "reverse-string", "valid-parentheses"];
