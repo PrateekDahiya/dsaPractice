@@ -85,7 +85,15 @@ async function initDb() {
   try { await pool.query(`ALTER TABLE code_saves DROP INDEX uniq_q_lang`); } catch {}
   try { await pool.query(`ALTER TABLE submissions DROP INDEX uniq_user_q_lang`); } catch {}
 
-  console.log('DB: questions, users, bookmarks, code_saves, submissions ready');
+  // indexes for dashboard speed
+  try { await pool.query(`CREATE INDEX idx_sub_user_passed_mode_created ON submissions (userId, passed, mode, createdAt)`); } catch {}
+  try { await pool.query(`CREATE INDEX idx_sub_user_q_created ON submissions (userId, questionId, createdAt)`); } catch {}
+  // Hikari-like warmup: pre-create 3 idle connections
+  try {
+    const { warmPool } = require('./pool');
+    await warmPool(3);
+  } catch (e) { console.warn('pool warmup skipped', e.message); }
+  console.log('DB: questions, users, bookmarks, code_saves, submissions ready (pool warmed)');
   return pool;
 }
 

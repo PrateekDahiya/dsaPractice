@@ -30,6 +30,7 @@ let db = null;
 try { db = require("./db"); } catch { db = null; }
 let dbReady = false;
 let useDb = !!db;
+let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
 async function ensureDb() {
   if (!useDb || dbReady) return dbReady;
   try {
@@ -595,13 +596,18 @@ const server = http.createServer(async (req, res) => {
     if (["weekly","week","7d","last7"].includes(filterParam)) filter = "weekly";
     else if (["monthly","month","30d","last30"].includes(filterParam)) filter = "monthly";
     else if (filterParam === "all-time" || filterParam === "alltime" || filterParam === "all") filter = "all";
-    else filter = filterParam; // let db normalize
+    else filter = filterParam;
     const rawLimit = parseInt(url.searchParams.get("limit") || "50", 10);
     const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 100);
+    const cacheKey = `${filter}:${limit}`;
+    const now = Date.now();
+    const cached = cache.leaderboard.get(cacheKey);
+    if (cached && now - cached.ts < 30000) return sendJson(res, cached.data, 200);
     await ensureDb();
     if (!dbReady || !db.getLeaderboard) return sendJson(res, [], 200);
     try {
       const rows = await db.getLeaderboard(filter, limit);
+      cache.leaderboard.set(cacheKey, { data: rows, ts: now });
       return sendJson(res, rows, 200);
     } catch (e) {
       return sendJson(res, { error: e.message }, 500);
@@ -640,11 +646,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // API
+  // API — cached 10s for questions
   if (pathname === "/api/questions" && req.method === "GET") {
+    const now = Date.now();
+    if (cache.questions && now - cache.questionsTs < 10000) {
+      return sendJson(res, cache.questions);
+    }
     const qs = await loadQuestions();
     qs.sort((a,b)=> (b._createdAt||0) - (a._createdAt||0));
     const summaries = qs.map(q => ({ id: q.id, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt }));
+    cache.questions = summaries;
+    cache.questionsTs = now;
     return sendJson(res, summaries);
   }
   if (pathname.startsWith("/api/questions/") && req.method === "GET") {
@@ -701,6 +713,8 @@ const server = http.createServer(async (req, res) => {
           fs.writeFileSync(filePath, JSON.stringify(q, null, 2), "utf8");
           console.log(`Created ${filePath}`);
         }
+        cache.questions = null; // invalidate
+        cache.leaderboard.clear();
         return sendJson(res, { ok: true, id: q.id }, 201);
       } catch (e) {
         console.error(e);
@@ -755,6 +769,7 @@ const server = http.createServer(async (req, res) => {
         const userId = req.user ? req.user.id : null;
         let id=null;
         if (useDb) { await ensureDb(); if (dbReady) id = await db.dbCreateSubmission({questionId, title, language, mode, code, passed, total, results: results||[], userId}); }
+        cache.leaderboard.clear();
         return sendJson(res, { ok:true, id }, 201);
       } catch (e) { return sendJson(res, { error: e.message }, 500); }
     });
@@ -794,8 +809,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Default route → dashboard (app must open on dashboard)
+  if (pathname === "/" ) {
+    return sendFile(res, path.join(ROOT, "dashboard.html"));
+  }
   // Static
-  let filePath = path.join(ROOT, pathname === "/" ? "index.html" : pathname);
+  let filePath = path.join(ROOT, pathname === "/" ? "dashboard.html" : pathname);
   if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end("Forbidden"); }
   try {
     const stat = fs.statSync(filePath);

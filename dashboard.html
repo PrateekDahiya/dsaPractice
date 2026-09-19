@@ -9,7 +9,7 @@
 <body style="overflow:auto;height:auto;min-height:100vh">
   <header class="topbar">
     <div class="topbar-left">
-      <a href="index.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
+      <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text)">DSA Practice</a>
       <nav style="display:flex;gap:8px;margin-left:10px">
         <a href="dashboard.html" class="ghost-link" style="border-color:var(--accent);color:var(--text)">Dashboard</a>
         <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
@@ -104,19 +104,17 @@
         targetId=null; // me
       }
       // if other user but not logged in, still allow viewing if server permits anon? Our /api/users/:id/dashboard requires DB but not necessarily auth for numeric id, but we try with auth if present
-      let data;
+      let data, questions;
       try{
-        data=await fetchDashboard(targetId);
+        [data, questions] = await Promise.all([fetchDashboard(targetId), fetchQuestionsSummaries()]);
       }catch(e){
         document.getElementById("dash-root").innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><h2 style="color:var(--text)">Error</h2><p>${esc(e.message)}</p></div>`;
         return;
       }
       const stats=data.stats;
       const solvedIds=new Set(data.solvedIds||[]);
-      // set read-only flag for history rendering elsewhere
       window.__DASHBOARD_READONLY = isOther;
       const userLabel = isOther ? `User #${esc(targetId)}` : (me? esc(me.username):"You");
-      const questions = await fetchQuestionsSummaries();
       const unsolved = questions.filter(q=>!solvedIds.has(q.id));
 
       const diff = stats.byDifficulty || { Easy:{solved:0,total:0}, Medium:{solved:0,total:0}, Hard:{solved:0,total:0} };
@@ -127,8 +125,24 @@
       const recent = stats.recent || [];
 
       const cal = streaks.calendar || [];
-      // color intensity by count using levelClass
-      const calHtml = cal.map(cell=> `<div class="cal-cell ${levelClass(cell.count)}" title="${cell.date}: ${cell.count} solve${cell.count!==1?'s':''}"></div>`).join("");
+      // group calendar by month for separate sections
+      function groupByMonth(calendar){
+        const groups = {};
+        for(const cell of calendar){
+          const month = cell.date.slice(0,7); // YYYY-MM
+          if(!groups[month]) groups[month]=[];
+          groups[month].push(cell);
+        }
+        return Object.entries(groups).sort((a,b)=> a[0].localeCompare(b[0]));
+      }
+      const calByMonth = groupByMonth(cal);
+      const monthName = (ym)=> { const [y,m]=ym.split('-'); const d=new Date(parseInt(y),parseInt(m)-1,1); return d.toLocaleString('en-US',{month:'short',year:'numeric'}); };
+      const calHtml = calByMonth.map(([ym, cells])=> `
+        <div class="month-block">
+          <div class="month-label">${monthName(ym)} <span style="color:var(--muted);font-weight:400">(${cells.filter(c=>c.count>0).length} active)</span></div>
+          <div class="cal-grid small">${cells.map(cell=> `<div class="cal-cell ${levelClass(cell.count)}" title="${cell.date}: ${cell.count} solve${cell.count!==1?'s':''}"></div>`).join("")}</div>
+        </div>
+      `).join("");
 
       const recentHtml = recent.length? `<ul>${recent.map(r=>`<li><a href="index.html#${esc(r.questionId)}">${esc(r.title)}</a><span style="display:flex;gap:6px;align-items:center"><span class="badge ${esc(r.difficulty)}">${esc(r.difficulty)}</span><span style="color:var(--muted);font-size:11px">${new Date(r.solvedAt).toLocaleDateString()}</span></span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No solves yet — start solving!</div>`;
 
@@ -158,9 +172,9 @@
               <div class="streak-card"><div class="num">${streaks.totalActive}</div><div class="lbl">Active days</div></div>
             </div>
             <div class="heatmap">
-              <h3>Activity — last 365 days</h3>
-              <div class="cal-grid">${calHtml}</div>
-              <div style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:11px;color:var(--muted)">Less <span style="display:flex;gap:3px">${[0,1,2,3,5].map(c=>`<span class="cal-cell ${levelClass(c)}" style="width:12px;height:12px"></span>`).join("")}</span> More</div>
+              <h3>Activity — last 12 months</h3>
+              <div class="months-grid">${calHtml}</div>
+              <div style="display:flex;gap:6px;align-items:center;margin-top:10px;font-size:11px;color:var(--muted)">Less <span style="display:flex;gap:3px">${[0,1,2,3,5].map(c=>`<span class="cal-cell ${levelClass(c)}" style="width:12px;height:12px"></span>`).join("")}</span> More</div>
             </div>
           </div>
         </div>

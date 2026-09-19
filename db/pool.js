@@ -18,9 +18,35 @@ function getConfig() {
 }
 
 let pool = null;
+let warmed = false;
 function getPool() {
-  if (!pool) pool = mysql.createPool(getConfig());
+  if (!pool) {
+    pool = mysql.createPool({
+      ...getConfig(),
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10000,
+      // Hikari-like: maxPoolSize = connectionLimit, minIdle = 2
+    });
+  }
   return pool;
 }
+// Hikari-style warmup: create 5 connections on start and keep them idle
+async function warmPool(minIdle = 3) {
+  const p = getPool();
+  if (warmed) return;
+  warmed = true;
+  const conns = [];
+  try {
+    for (let i = 0; i < minIdle; i++) {
+      const c = await p.getConnection();
+      // verify with ping
+      await c.ping();
+      conns.push(c);
+    }
+  } finally {
+    conns.forEach(c => { try { c.release(); } catch {} });
+  }
+  console.log(`DB pool warmed: ${minIdle} connections ready (Hikari-like)`);
+}
 
-module.exports = { getPool, getConfig };
+module.exports = { getPool, getConfig, warmPool };

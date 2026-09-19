@@ -28,19 +28,28 @@ async function getSolvedIds(userId) {
 }
 async function getStats(userId) {
   const pool = getPool();
-  let total = 0;
+  // parallel: total + byDiff
+  const [[cRows],[dRows]] = await Promise.all([
+    pool.query('SELECT COUNT(*) as cnt FROM questions').catch(()=>[ [{cnt:0}] ]),
+    pool.query('SELECT difficulty, COUNT(*) as cnt FROM questions GROUP BY difficulty').catch(()=>[[]])
+  ]);
+  let total = cRows[0]?.cnt || 0;
   let totalByDiff = { Easy: 0, Medium: 0, Hard: 0 };
-  try {
-    const [cRows] = await pool.query('SELECT COUNT(*) as cnt FROM questions');
-    total = cRows[0]?.cnt || 0;
-    const [dRows] = await pool.query('SELECT difficulty, COUNT(*) as cnt FROM questions GROUP BY difficulty');
-    for (const r of dRows) totalByDiff[r.difficulty] = r.cnt;
-  } catch {}
+  for (const r of (dRows||[])) totalByDiff[r.difficulty] = r.cnt;
   if (!userId) {
     return { solved: 0, total, byDifficulty: { Easy: { solved: 0, total: totalByDiff.Easy||0 }, Medium: { solved: 0, total: totalByDiff.Medium||0 }, Hard: { solved: 0, total: totalByDiff.Hard||0 } }, recent: [], perDay: [], streaks: { current: 0, longest: 0, totalActive: 0, calendar: buildEmptyCalendar(365) } };
   }
   try {
-    const [solvedDiffRows] = await pool.query(`SELECT q.difficulty as difficulty, COUNT(DISTINCT s.questionId) as cnt FROM submissions s JOIN questions q ON q.id=s.questionId WHERE s.userId=? AND s.passed=s.total AND s.mode='submit' GROUP BY q.difficulty`, [userId]);
+    const todayPromise = pool.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') as today").then(([r])=> toISODate(r[0].today)).catch(()=> new Date().toISOString().slice(0,10));
+    const [solvedDiffRows, solvedCntRows, recentRows, perDayRows, dateRows, countPerDateRows, todayStr] = await Promise.all([
+      pool.query(`SELECT q.difficulty as difficulty, COUNT(DISTINCT s.questionId) as cnt FROM submissions s JOIN questions q ON q.id=s.questionId WHERE s.userId=? AND s.passed=s.total AND s.mode='submit' GROUP BY q.difficulty`, [userId]).then(([r])=>r).catch(() => []),
+      pool.query(`SELECT COUNT(DISTINCT questionId) as cnt FROM submissions WHERE userId=? AND passed=total AND mode='submit'`, [userId]).then(([r])=>r).catch(() => [{cnt:0}]),
+      pool.query(`SELECT s.questionId as questionId, q.title as title, q.difficulty as difficulty, MAX(s.createdAt) as solvedAt FROM submissions s JOIN questions q ON q.id=s.questionId WHERE s.userId=? AND s.passed=s.total AND s.mode='submit' GROUP BY s.questionId, q.title, q.difficulty ORDER BY solvedAt DESC LIMIT 10`, [userId]).then(([r])=>r).catch(() => []),
+      pool.query(`SELECT DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') as d, COUNT(DISTINCT questionId) as cnt FROM submissions WHERE userId=? AND passed=total AND mode='submit' GROUP BY DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') ORDER BY d ASC`, [userId]).then(([r])=>r).catch(()=>[]),
+      pool.query(`SELECT DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') as d FROM submissions WHERE userId=? AND passed=total AND mode='submit' GROUP BY DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') ORDER BY d ASC`, [userId]).then(([r])=>r).catch(()=>[]),
+      pool.query(`SELECT DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') as d, COUNT(DISTINCT questionId) as cnt FROM submissions WHERE userId=? AND passed=total AND mode='submit' GROUP BY DATE_FORMAT(DATE(createdAt), '%Y-%m-%d')`, [userId]).then(([r])=>r).catch(()=>[]),
+      todayPromise
+    ]);
     const solvedByDiffMap = {};
     for (const r of solvedDiffRows) solvedByDiffMap[r.difficulty] = r.cnt;
     const byDifficulty = {
@@ -48,14 +57,9 @@ async function getStats(userId) {
       Medium: { solved: solvedByDiffMap.Medium || 0, total: totalByDiff.Medium || 0 },
       Hard: { solved: solvedByDiffMap.Hard || 0, total: totalByDiff.Hard || 0 },
     };
-    const [solvedCntRows] = await pool.query(`SELECT COUNT(DISTINCT questionId) as cnt FROM submissions WHERE userId=? AND passed=total AND mode='submit'`, [userId]);
     const solved = solvedCntRows[0]?.cnt || 0;
-    const [recentRows] = await pool.query(`SELECT s.questionId as questionId, q.title as title, q.difficulty as difficulty, MAX(s.createdAt) as solvedAt FROM submissions s JOIN questions q ON q.id=s.questionId WHERE s.userId=? AND s.passed=s.total AND s.mode='submit' GROUP BY s.questionId, q.title, q.difficulty ORDER BY solvedAt DESC LIMIT 10`, [userId]);
     const recent = recentRows.map(r => ({ questionId: r.questionId, title: r.title, difficulty: r.difficulty, solvedAt: r.solvedAt ? new Date(r.solvedAt).toISOString() : null }));
-    const [perDayRows] = await pool.query(`SELECT DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') as d, COUNT(DISTINCT questionId) as cnt FROM submissions WHERE userId=? AND passed=total AND mode='submit' GROUP BY DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') ORDER BY d ASC`, [userId]);
     const perDay = perDayRows.map(r => ({ date: toISODate(r.d), count: r.cnt }));
-    const [dateRows] = await pool.query(`SELECT DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') as d FROM submissions WHERE userId=? AND passed=total AND mode='submit' GROUP BY DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') ORDER BY d ASC`, [userId]);
-    const [countPerDateRows] = await pool.query(`SELECT DATE_FORMAT(DATE(createdAt), '%Y-%m-%d') as d, COUNT(DISTINCT questionId) as cnt FROM submissions WHERE userId=? AND passed=total AND mode='submit' GROUP BY DATE_FORMAT(DATE(createdAt), '%Y-%m-%d')`, [userId]);
     const countMap = {};
     for (const r of countPerDateRows) countMap[toISODate(r.d)] = r.cnt;
     const distinctDates = dateRows.map(r => toISODate(r.d)).sort();
@@ -67,8 +71,6 @@ async function getStats(userId) {
       prev = ds;
     }
     if (distinctDates.length === 0) longest = 0;
-    let todayStr;
-    try { const [todayRows] = await pool.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') as today"); todayStr = toISODate(todayRows[0].today); } catch { todayStr = new Date().toISOString().slice(0,10); }
     let current = 0;
     if (dateSet.has(todayStr)) {
       current = 1;
@@ -103,16 +105,15 @@ async function getLeaderboard(filter = 'all', limit = 50) {
   } catch { return []; }
 }
 async function getUserDashboard(userId) {
-  const stats = await getStats(userId);
-  let submissions = [], solvedIds = [];
-  try {
-    if (userId) {
-      const { dbGetSubmissions } = require('./submissions');
-      const { getSolvedIds: gsi } = require('./stats');
-      submissions = await require('./submissions').dbGetSubmissions(null, 50, userId);
-      solvedIds = await getSolvedIds(userId);
-    }
-  } catch {}
+  if (!userId) {
+    const stats = await getStats(null);
+    return { stats, submissions: [], solvedIds: [] };
+  }
+  const [stats, submissions, solvedIds] = await Promise.all([
+    getStats(userId),
+    require('./submissions').dbGetSubmissions(null, 50, userId).catch(()=>[]),
+    getSolvedIds(userId).catch(()=>[])
+  ]);
   return { stats, submissions, solvedIds };
 }
 
