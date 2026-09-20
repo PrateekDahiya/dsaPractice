@@ -75,13 +75,14 @@
             </div>
           </div>
           <div id="history-list" class="history-list"></div>
-          <div id="history-detail" class="history-detail"></div>
+          <div style="color:var(--muted);font-size:12px;padding:8px 0">Select a submission to view code &amp; results in the right panel.</div>
         </div>
       </section>
 
       <div id="main-resizer" class="resizer vertical"></div>
 
       <section class="editor-pane" id="editor-pane" style="flex:1">
+        <div id="editor-edit-mode" style="display:flex;flex-direction:column;flex:1;min-height:0">
         <div class="editor-header">
           <div class="editor-header-left">
             <label for="language-select">Language</label>
@@ -108,6 +109,23 @@
             <span id="last-run-meta"></span>
           </div>
           <div id="test-results" class="test-results"></div>
+        </div>
+        </div>
+        <div id="submission-view" class="submission-view hidden" style="display:flex;flex-direction:column;flex:1;min-height:0">
+          <div class="editor-header">
+            <div class="editor-header-left">
+              <span id="submission-view-title" style="font-weight:700;font-size:13px">Submission</span>
+              <span id="submission-view-meta" style="font-size:12px"></span>
+            </div>
+            <div class="editor-actions" style="display:flex;gap:8px">
+              <button id="submission-restore-btn" class="btn primary" style="padding:6px 12px">Restore to editor</button>
+              <button id="submission-back-btn" class="btn ghost" style="padding:6px 10px">Back to editor</button>
+            </div>
+          </div>
+          <div class="submission-view-body" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <pre id="submission-view-code" class="submission-code" style="flex:1;overflow:auto;margin:0"></pre>
+            <div id="submission-view-results" class="test-results" style="flex:1;border-top:1px solid var(--border)"></div>
+          </div>
         </div>
       </section>
     </main>

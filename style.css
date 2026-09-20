@@ -380,6 +380,22 @@ body {
 .lb-user a{ color:var(--text); text-decoration:none; font-weight:600; }
 .lb-user a:hover{ color:var(--accent); }
 
+.submission-view.hidden{ display:none !important; }
+#editor-edit-mode.hidden{ display:none !important; }
+.submission-view-body{ background:var(--panel); }
+.submission-code{
+  background:#0f1117;
+  color:#e6e8eb;
+  padding:12px;
+  font-family:var(--mono);
+  font-size:13px;
+  line-height:1.5;
+  white-space:pre-wrap;
+  word-break:break-all;
+  user-select:text;
+}
+#submission-view-meta{ color:var(--muted); }
+
 .hidden{ display:none !important; }
 
 @media (max-width: 900px) {

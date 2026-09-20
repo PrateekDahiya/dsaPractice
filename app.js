@@ -708,18 +708,82 @@ async function saveHistoryEntry(entry) {
     renderList();
   }
 }
+let viewingSubmission = null;
+function showEditMode(){
+  viewingSubmission = null;
+  const editMode = document.getElementById("editor-edit-mode");
+  const viewMode = document.getElementById("submission-view");
+  if(editMode) editMode.classList.remove("hidden");
+  if(editMode) editMode.style.display = "flex";
+  if(viewMode) viewMode.classList.add("hidden");
+  if(viewMode) viewMode.style.display = "none";
+}
+function showSubmissionView(e){
+  viewingSubmission = e;
+  const editMode = document.getElementById("editor-edit-mode");
+  const viewMode = document.getElementById("submission-view");
+  if(editMode) editMode.classList.add("hidden");
+  if(editMode) editMode.style.display = "none";
+  if(viewMode) viewMode.classList.remove("hidden");
+  if(viewMode) viewMode.style.display = "flex";
+  const titleEl = document.getElementById("submission-view-title");
+  const metaEl = document.getElementById("submission-view-meta");
+  const codeEl = document.getElementById("submission-view-code");
+  const resultsEl2 = document.getElementById("submission-view-results");
+  const isReadOnly = window.__DASHBOARD_READONLY === true;
+  if(titleEl) titleEl.textContent = `${e.title || e.questionId} · ${e.mode} · ${e.language} · ${e.passed}/${e.total}`;
+  if(metaEl) metaEl.textContent = new Date(e.ts).toLocaleString();
+  if(codeEl){
+    if(isReadOnly){
+      codeEl.textContent = "Read-only view — code hidden for other user";
+    } else {
+      codeEl.textContent = (e.code||"").slice(0, 8000) + ((e.code||"").length>8000 ? "\n...truncated" : "");
+    }
+  }
+  if(resultsEl2){
+    resultsEl2.innerHTML = `<div class="results-header"><div class="results-title">Results ${e.passed}/${e.total}</div></div>` +
+      (e.results ? e.results.map((r,i)=>`<div class="test-case open"><div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error || JSON.stringify(r.actual))}</pre></span></div></div></div>`).join("") : "no results");
+  }
+  const restoreBtn = document.getElementById("submission-restore-btn");
+  if(restoreBtn){
+    restoreBtn.style.display = isReadOnly ? "none" : "";
+    restoreBtn.onclick = () => restoreSubmissionToEditor(e);
+  }
+  const backBtn = document.getElementById("submission-back-btn");
+  if(backBtn){
+    backBtn.onclick = () => {
+      showEditMode();
+      // stay on submissions tab, but show editor — user can switch to Description to continue editing
+    };
+  }
+}
+function restoreSubmissionToEditor(e){
+  if(!e) return;
+  if(window.__DASHBOARD_READONLY){ toast("Read-only — cannot restore"); return; }
+  currentLang = e.language;
+  if(langSelect) langSelect.value = currentLang;
+  if(codeEditor) codeEditor.value = e.code;
+  saveCode();
+  toast(`Restored ${e.language} code to editor`);
+  showEditMode();
+  // switch left to Description so user sees editor context
+  document.querySelectorAll(".ptab").forEach(b=>b.classList.remove("active"));
+  document.querySelectorAll(".ptab-panel").forEach(p=>p.classList.remove("active"));
+  const descBtn = document.querySelector('.ptab[data-ptab="desc"]');
+  if(descBtn) descBtn.classList.add("active");
+  const descPanel = document.getElementById("ptab-desc");
+  if(descPanel) descPanel.classList.add("active");
+  if (currentQuestion && e.questionId !== currentQuestion.id) loadQuestion(e.questionId);
+}
 async function renderHistory() {
   const listEl = document.getElementById("history-list");
-  const detailEl = document.getElementById("history-detail");
   if (!listEl) return;
   listEl.innerHTML = `<div class="loading">Loading history...</div>`;
   const all = await fetchHistoryFromDb();
   const filtered = all;
-  // detect read-only view (other user's dashboard)
   const isReadOnly = window.__DASHBOARD_READONLY === true;
   if (filtered.length === 0) {
     listEl.innerHTML = `<div class="empty-hist">No runs yet.<br>Hit Run or Submit.</div>`;
-    if (detailEl) detailEl.innerHTML = `<div class="empty-hist">History saved to DB (and local) — persists across devices. Every Run/Submit + code autosave every 10s to DB.</div>`;
     return;
   }
   listEl.innerHTML = filtered.slice(0, 20).map((e) => {
@@ -740,48 +804,35 @@ async function renderHistory() {
       ev.stopPropagation();
       const e = findById(btn.dataset.hid);
       if (!e) return;
-      currentLang = e.language;
-      if(langSelect) langSelect.value = currentLang;
-      codeEditor.value = e.code;
-      saveCode();
-      toast(`Restored ${e.language} code from ${new Date(e.ts).toLocaleTimeString()}`);
-      if (currentQuestion && e.questionId !== currentQuestion.id) loadQuestion(e.questionId);
+      restoreSubmissionToEditor(e);
+      listEl.querySelectorAll(".history-item").forEach(x => x.classList.remove("active"));
+      btn.closest(".history-item")?.classList.add("active");
     });
   });
   listEl.querySelectorAll(".view-btn").forEach(btn => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const e = findById(btn.dataset.hid);
-      if (detailEl) showHistoryDetail(e);
+      if (!e) return;
+      showSubmissionView(e);
+      listEl.querySelectorAll(".history-item").forEach(x => x.classList.remove("active"));
+      btn.closest(".history-item")?.classList.add("active");
     });
   });
   listEl.querySelectorAll(".history-item").forEach(el => {
     el.addEventListener("click", () => {
       const e = findById(el.dataset.hid);
-      if (detailEl) showHistoryDetail(e);
+      if (!e) return;
+      showSubmissionView(e);
       listEl.querySelectorAll(".history-item").forEach(x => x.classList.remove("active"));
       el.classList.add("active");
     });
   });
 }
 function showHistoryDetail(e) {
-  const detailEl = document.getElementById("history-detail");
-  if (!detailEl) return;
-  const isReadOnly = window.__DASHBOARD_READONLY === true;
-  detailEl.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center"><strong>${esc(e.title || e.questionId)} · ${e.mode} · ${esc(e.language)} · ${e.passed}/${e.total}</strong><span style="color:var(--muted);font-size:11px">${new Date(e.ts).toLocaleString()}</span></div>
-    ${isReadOnly ? "<div style='color:var(--muted);font-size:12px;margin-top:6px'>Read-only view — code hidden for other user</div>" : `<div style="margin-top:6px;display:flex;gap:6px"><button class="btn ghost" id="hist-copy">Copy code</button><button class="btn ghost" id="hist-restore">Restore to editor</button></div>
-    <pre>${esc((e.code||"").slice(0, 4000))}${(e.code||"").length > 4000 ? "\n...truncated" : ""}</pre>`}
-    <div style="margin-top:8px"><strong>Results:</strong> ${e.results ? e.results.map((r,i)=>`<div style="margin-top:4px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--panel2)"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}<br><small>Input: ${esc(JSON.stringify(r.input))} | Expected: ${esc(JSON.stringify(r.expected))} | Got: ${esc(r.error || JSON.stringify(r.actual))}</small></div>`).join("") : "no results"}</div>
-  `;
-  if(isReadOnly) return;
-  detailEl.querySelector("#hist-copy")?.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(e.code); toast("Copied"); } catch { toast("Copy failed"); }
-  });
-  detailEl.querySelector("#hist-restore")?.addEventListener("click", () => {
-    currentLang = e.language; if(langSelect) langSelect.value = currentLang;
-    codeEditor.value = e.code; saveCode(); toast("Restored to editor");
-  });
+  // Backward compat: route to right panel (no bottom scroll)
+  if (!e) return;
+  showSubmissionView(e);
 }
 document.getElementById("clear-history-btn")?.addEventListener("click", async () => {
   if(window.__DASHBOARD_READONLY){ toast("Read-only — cannot clear"); return; }
@@ -810,80 +861,46 @@ async function execute(mode) {
   if(resultsEl) resultsEl.innerHTML = `<div class="loading">Executing ${mode==="run"?"visible":"all"} tests...</div>`;
   let payload = null;
   let execError = null;
-  // Try streaming first (SSE) — shows each case as it finishes
+  // Best: per-testcase API — UI renders each case immediately, no waiting for all
   try {
-    const token = getToken();
-    const headers = { "Content-Type": "application/json" };
-    if(token) headers["Authorization"] = "Bearer "+token;
-    const res = await fetch("/api/execute/stream", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ questionId: currentQuestion.id, code, language: currentLang, mode })
-    });
-    if (res.ok && res.body && res.headers.get("content-type")?.includes("text/event-stream")) {
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let total = currentQuestion[mode==="run"?"visibleTestCases":"hiddenTestCases"] ? (currentQuestion.visibleTestCases.length + (mode==="submit"?currentQuestion.hiddenTestCases.length:0)) : 0;
-      let results = [];
-      let passed = 0;
-      // init streaming UI
-      if(resultsEl) resultsEl.innerHTML = `<div class="results-header"><div class="results-title">${mode==="run"?"Run — Visible Tests":"Submit — All Tests"} (streaming...)</div><span class="results-summary">0 / ${total}</span></div><div id="stream-results"></div>`;
-      const streamContainer = document.getElementById("stream-results");
-      const appendCase = (r, idx) => {
-        const div = document.createElement("div");
-        div.className = "test-case open";
-        div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:JSON.stringify(r.actual,null,2))}</pre></span></div></div>`;
-        if(streamContainer) streamContainer.appendChild(div);
-        // update header count
-        const hdr = resultsEl.querySelector(".results-summary");
-        if(hdr) hdr.textContent = `${results.filter(x=>x.passed).length} / ${total} passed`;
-        if(statusText) statusText.textContent = `${results.filter(x=>x.passed).length}/${total} done`;
-      };
-      while(true){
-        const {done, value} = await reader.read();
-        if(done) break;
-        buffer += decoder.decode(value, {stream:true});
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop();
-        for(const part of parts){
-          const lines = part.split("\n");
-          let event = null, dataStr = null;
-          for(const line of lines){
-            if(line.startsWith("event: ")) event=line.slice(7).trim();
-            else if(line.startsWith("data: ")) dataStr=line.slice(6);
-          }
-          if(event==="start" && dataStr){
-            try{ const d=JSON.parse(dataStr); total=d.total||total; }catch{}
-          } else if(dataStr){
-            try{
-              const d=JSON.parse(dataStr);
-              if(d.testCaseId){
-                results.push(d);
-                appendCase(d, results.length-1);
-              } else if(d.passed!==undefined && d.total!==undefined && !d.testCaseId){
-                passed=d.passed; total=d.total;
-              }
-            }catch{}
-          }
-        }
+    const total = currentQuestion.visibleTestCases.length + (mode==="submit"?currentQuestion.hiddenTestCases.length:0);
+    let results = [];
+    if(resultsEl) resultsEl.innerHTML = `<div class="results-header"><div class="results-title">${mode==="run"?"Run — Visible Tests":"Submit — All Tests"} (live...)</div><span class="results-summary">0 / ${total}</span></div><div id="stream-results"></div>`;
+    const streamContainer = document.getElementById("stream-results");
+    const appendCase = (r, idx) => {
+      const div = document.createElement("div");
+      div.className = "test-case open";
+      div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:JSON.stringify(r.actual,null,2))}</pre></span></div></div>`;
+      if(streamContainer) streamContainer.appendChild(div);
+      const hdr = resultsEl.querySelector(".results-summary");
+      if(hdr) hdr.textContent = `${results.filter(x=>x.passed).length} / ${total} passed`;
+      if(statusText) statusText.textContent = `${results.length}/${total} done (${results.filter(x=>x.passed).length} passed)`;
+    };
+    // fire sequentially so each renders as soon as it resolves (first pays compile ~1s, rest cached instant)
+    for(let i=0;i<total;i++){
+      const resCase = await apiFetch("/api/execute/case", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId: currentQuestion.id, code, language: currentLang, mode, index: i })
+      });
+      if(!resCase.ok){
+        const err = await resCase.json().catch(()=>({error: resCase.statusText}));
+        throw new Error(err.error||"case failed");
       }
-      // finalize
-      payload = { mode, total: results.length? results.length : total, passed: results.filter(r=>r.passed).length, results };
-      // re-render final summary properly
-      renderResults(payload);
-      hideLoader();
-      if(runBtn) { runBtn.disabled = false; runBtn.textContent = "Run"; }
-      if(submitBtn) submitBtn.disabled = false;
-      if(payload) saveHistoryEntry({ id: Date.now()+"_"+Math.random().toString(36).slice(2,6), ts: Date.now(), questionId: currentQuestion.id, title: currentQuestion.title, language: currentLang, mode, code, passed: payload.passed, total: payload.total, results: payload.results });
-      return;
-    } else {
-      // not streaming, fallback to normal
-      throw new Error("no stream");
+      const r = await resCase.json();
+      results.push(r);
+      appendCase(r, i);
     }
-  } catch (e) {
-    // fallback to normal /api/execute
-    console.log("stream not available, fallback", String(e).slice(0,100));
+    payload = { mode, total, passed: results.filter(r=>r.passed).length, results };
+    renderResults(payload);
+    hideLoader();
+    if(runBtn) { runBtn.disabled = false; runBtn.textContent = "Run"; }
+    if(submitBtn) submitBtn.disabled = false;
+    if(payload) saveHistoryEntry({ id: Date.now()+"_"+Math.random().toString(36).slice(2,6), ts: Date.now(), questionId: currentQuestion.id, title: currentQuestion.title, language: currentLang, mode, code, passed: payload.passed, total: payload.total, results: payload.results });
+    return;
+  } catch(e) {
+    console.log("per-case failed, fallback to batch", String(e).slice(0,120));
+    if(resultsEl) resultsEl.innerHTML = `<div class="loading">Retrying batch...</div>`;
   }
   try {
     const res = await apiFetch("/api/execute", {
@@ -1151,6 +1168,32 @@ document.querySelectorAll(".ptab").forEach(btn=>{
     document.querySelectorAll(".ptab-panel").forEach(p=>p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("ptab-"+btn.dataset.ptab).classList.add("active");
+    // Right panel follows left tab: desc -> editor, submissions -> submission view (or empty)
+    if(btn.dataset.ptab === "desc"){
+      showEditMode();
+    } else if(btn.dataset.ptab === "submissions"){
+      // if already viewing, keep it; else show empty placeholder in right panel
+      if(!viewingSubmission){
+        // show empty submission view so right panel mirrors submissions tab
+        const editMode = document.getElementById("editor-edit-mode");
+        const viewMode = document.getElementById("submission-view");
+        if(editMode) { editMode.classList.add("hidden"); editMode.style.display = "none"; }
+        if(viewMode) {
+          viewMode.classList.remove("hidden");
+          viewMode.style.display = "flex";
+          const titleEl = document.getElementById("submission-view-title");
+          const metaEl = document.getElementById("submission-view-meta");
+          const codeEl = document.getElementById("submission-view-code");
+          const resultsEl2 = document.getElementById("submission-view-results");
+          if(titleEl) titleEl.textContent = "No submission selected";
+          if(metaEl) metaEl.textContent = "";
+          if(codeEl) codeEl.textContent = "Select a submission from the left to view code & results here (no scroll needed).";
+          if(resultsEl2) resultsEl2.innerHTML = "";
+          const restoreBtn = document.getElementById("submission-restore-btn");
+          if(restoreBtn) restoreBtn.style.display = "none";
+        }
+      }
+    }
   });
 });
 

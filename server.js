@@ -1019,16 +1019,114 @@ const server = http.createServer(async (req, res) => {
             sendOne(tc, actual, err, Date.now()-start);
           }
         } else if (language==="python") {
+          // Stream Python per-case with flush for true streaming
           try{
-            const actuals = await runPythonBatch(code,q,testCases);
-            for(let i=0;i<testCases.length;i++) sendOne(testCases[i], actuals[i], null, 0);
-          }catch(e){
-            for(const tc of testCases) sendOne(tc, null, e.message, 0);
-          }
+            const tmpFile = path.join(os.tmpdir(), `dsa_stream_${Date.now()}_${Math.random().toString(36).slice(2)}.py`);
+            const fnName = q.pythonFunctionName || q.functionName;
+            const casesJson = JSON.stringify(testCases.map(tc=>({input:tc.input})));
+            const isComposite = testCases[0] && testCases[0].expectedOutput && typeof testCases[0].expectedOutput==="object" && !Array.isArray(testCases[0].expectedOutput) && ("k" in testCases[0].expectedOutput);
+            const isReverse = q.id==="reverse-string";
+            let driver;
+            if(isComposite) driver = `\nimport json,sys\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    inp={k: list(v) if isinstance(v,list) else v for k,v in tc["input"].items()}\n    _ret=${fnName}(**inp)\n    print(json.dumps({"k":_ret,"${q.params[0]}": inp["${q.params[0]}"]}), flush=True)\n`;
+            else if(isReverse) driver = `\nimport json\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    inp={k: list(v) if isinstance(v,list) else v for k,v in tc["input"].items()}\n    _ret=${fnName}(**inp)\n    if _ret is None: _ret=inp["${q.params[0]}"]\n    print(json.dumps(_ret), flush=True)\n`;
+            else driver = `\nimport json\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    _ret=${fnName}(**tc["input"])\n    print(json.dumps(_ret), flush=True)\n`;
+            fs.writeFileSync(tmpFile, code+"\n"+driver, "utf8");
+            const py = spawn("python", [tmpFile]);
+            let stderr=""; py.stderr.on("data",d=>stderr+=d);
+            py.on("error", async()=>{ try{ const py3=spawn("python3",[tmpFile]); let out=""; py3.stdout.on("data",d=>{ const lines=d.toString().split("\n").filter(Boolean); for(const line of lines){ try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0); }catch{} } }); py3.on("close",c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(c!==0) for(const tc of testCases) sendOne(tc,null,"python3 error "+c,0); }); }catch{} });
+            let outBuf=""; py.stdout.on("data", d=>{
+              outBuf+=d.toString();
+              let lines=outBuf.split("\n");
+              outBuf=lines.pop();
+              for(const line of lines){ if(!line.trim()) continue; try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0); }catch(e){} }
+            });
+            await new Promise((res,rej)=>{ py.on("close", c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(outBuf.trim()){ try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0); }catch{} } if(c!==0 && c!==null) { /* already handled */ } res(); }); py.on("error", rej); });
+          }catch(e){ for(const tc of testCases) sendOne(tc, null, e.message, 0); }
         } else if (language==="cpp") {
+          // Compile once, then stream each case as exe prints (endl flushes)
           try{
-            const actuals = await runCppBatch(code,q,testCases);
-            for(let i=0;i<testCases.length;i++) sendOne(testCases[i], actuals[i], null, 0);
+            const fnName = q.cppFunctionName || q.functionName;
+            const params = q.params;
+            const isReverse = q.id==="reverse-string";
+            const isCompositeSample = testCases[0] && testCases[0].expectedOutput && typeof testCases[0].expectedOutput==="object" && !Array.isArray(testCases[0].expectedOutput) && ("k" in testCases[0].expectedOutput);
+            const isInPlaceVoid = isReverse || q.id==="move-zeroes";
+            const batchDecls = params.map(p=>{
+              const firstVal = testCases[0].input[p];
+              const baseType = cppTypeFor(firstVal);
+              return `vector<${baseType}> _batch_${p} = {${testCases.map(tc=>jsonToCppLiteral(tc.input[p])).join(", ")}};`;
+            }).join("\n  ");
+            const n = testCases.length;
+            const hasInclude = code.includes("#include");
+            const header = hasInclude ? "" : '#include <bits/stdc++.h>\nusing namespace std;\n';
+            const printHelpers = `\ntemplate<typename T> void printJsonVal(const T& v);\nvoid printJsonVal(int v){ cout << v; }\nvoid printJsonVal(double v){ cout << v; }\nvoid printJsonVal(bool v){ cout << (v?"true":"false"); }\nvoid printJsonVal(const string& v){ cout << '"' << v << '"'; }\nvoid printJsonVal(char v){ cout << '"' << v << '"'; }\ntemplate<typename T> void printJsonVal(const vector<T>& v){ cout << "["; for(size_t i=0;i<v.size();++i){ if(i) cout << ","; printJsonVal(v[i]); } cout << "]"; }\n`;
+            let driver;
+            const idxSupport = `int _s=0,_e=${n}; if(argc>1){_s=atoi(argv[1]); _e=_s+1; if(_s<0||_s>=${n}) return 0;}`;
+            if(isCompositeSample){
+              driver=`\nint main(int argc, char** argv){\n  ${batchDecls}\n  ${idxSupport}\n  for(int i=_s;i<_e;i++){\n    auto _k = ${fnName}(_batch_${params[0]}[i]${params.length>1?", "+params.slice(1).map(p=>`_batch_${p}[i]`).join(", "):""});\n    cout << "{\\"k\\":" << _k << ",\\"${params[0]}\\" :"; printJsonVal(_batch_${params[0]}[i]); cout << "}" << endl;\n  }\n  return 0;\n}\n`;
+            } else if(isInPlaceVoid){
+              driver=`\nint main(int argc, char** argv){\n  ${batchDecls}\n  ${idxSupport}\n  for(int i=_s;i<_e;i++){\n    ${fnName}(_batch_${params[0]}[i]${params.length>1?", "+params.slice(1).map(p=>`_batch_${p}[i]`).join(", "):""});\n    printJsonVal(_batch_${params[0]}[i]); cout << endl;\n  }\n  return 0;\n}\n`;
+            } else {
+              const callArgs=params.map(p=>`_batch_${p}[i]`).join(", ");
+              driver=`\nint main(int argc, char** argv){\n  ${batchDecls}\n  ${idxSupport}\n  for(int i=_s;i<_e;i++){\n    auto _ret = ${fnName}(${callArgs});\n    printJsonVal(_ret); cout << endl;\n  }\n  return 0;\n}\n`;
+            }
+            const crypto = require("crypto");
+            const hash = crypto.createHash("sha256").update(code+"|"+q.id+"|"+mode+"|v2-index").digest("hex").slice(0,16);
+            const cacheDir = path.join(os.tmpdir(), "dsa_cache");
+            try{fs.mkdirSync(cacheDir,{recursive:true});}catch{}
+            const exe=path.join(cacheDir, `dsa_${hash}.exe`);
+            const tmpCpp=path.join(os.tmpdir(), `dsa_stream_${Date.now()}_${Math.random().toString(36).slice(2)}.cpp`);
+            const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","C:\\tools\\mingw64\\bin\\g++.exe","g++"];
+            let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
+            let cacheHit = fs.existsSync(exe);
+            if(!cacheHit){
+              fs.writeFileSync(tmpCpp, header+"\n"+code+"\n"+printHelpers+"\n"+driver, "utf8");
+              let cErr="";
+              await new Promise((res,rej)=>{
+                const comp=spawn(compiler, ["-std=c++17","-O0",tmpCpp,"-o",exe]);
+                comp.stderr.on("data",d=>cErr+=d);
+                comp.on("close",c=>c===0?res():rej(new Error("Compile Error:\\n"+cErr)));
+                comp.on("error",e=>rej(new Error("Compile spawn error: "+e.message)));
+              });
+              try{fs.unlinkSync(tmpCpp);}catch{}
+            } else {
+              try{fs.unlinkSync(tmpCpp);}catch{}
+            }
+            const binDir=path.dirname(compiler);
+            const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
+            const run=spawn(exe, [], {env: runEnv});
+            let outBuf="", rErr="";
+            let idx=0;
+            const t0=Date.now();
+            run.stdout.on("data", d=>{
+              outBuf+=d.toString();
+              let lines=outBuf.split("\n");
+              outBuf=lines.pop();
+              for(const line of lines){
+                if(!line.trim()) continue;
+                try{
+                  const actual=JSON.parse(line);
+                  const tc=testCases[idx++];
+                  if(tc) sendOne(tc, actual, null, Date.now()-t0);
+                }catch{}
+              }
+            });
+            run.stderr.on("data",d=>rErr+=d);
+            await new Promise((res,rej)=>{
+              const kill=setTimeout(()=>{try{run.kill();}catch{}; rej(new Error("Time Limit Exceeded"));},8000);
+              run.on("close",c=>{
+                clearTimeout(kill);
+                if(outBuf.trim() && idx<testCases.length){
+                  try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases[idx++]; if(tc) sendOne(tc, actual, null, Date.now()-t0); }catch{}
+                }
+                // keep cached exe for reruns (do NOT delete)
+                if(c!==0 && idx<testCases.length){
+                  // remaining cases failed
+                  for(let j=idx;j<testCases.length;j++) sendOne(testCases[j], null, rErr||`exit ${c}`, 0);
+                }
+                res();
+              });
+              run.on("error",rej);
+            });
           }catch(e){
             for(const tc of testCases) sendOne(tc, null, e.message, 0);
           }
@@ -1036,6 +1134,78 @@ const server = http.createServer(async (req, res) => {
         res.write(`event: done\ndata: ${JSON.stringify({passed, total:testCases.length})}\n\n`);
         res.end();
       } catch(e){ try{ res.writeHead(500, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:e.message})); }catch{} }
+    });
+    return;
+  }
+  // Per-testcase API — UI calls once per case, renders immediately without waiting for all
+  if (pathname === "/api/execute/case" && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { questionId, code, language, mode, index } = JSON.parse(body || "{}");
+        if (!questionId || !code || !language || !mode || index===undefined) return sendJson(res, { error: "Missing fields: questionId, code, language, mode, index" }, 400);
+        if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) return sendJson(res, { error: "bad request" }, 400);
+        const q = await getQuestionById(questionId);
+        if (!q) return sendJson(res, { error: "Question not found" }, 404);
+        const visible = q.visibleTestCases.map(tc=>({...tc,_hidden:false}));
+        const hidden = (q.hiddenTestCases||[]).map(tc=>({...tc,_hidden:true}));
+        const all = mode==="run"?visible:[...visible,...hidden];
+        const tc = all[index];
+        if (!tc) return sendJson(res, { error: "bad index" }, 400);
+        const start = Date.now();
+        let actual=null, error=null, ok=false;
+        try{
+          if(language==="javascript") actual=runJS(code,q,tc.input,tc.expectedOutput);
+          else if(language==="python") actual=await runPython(code,q,tc.input,tc.expectedOutput);
+          else if(language==="cpp"){
+            // reuse cached batch exe with index arg (compile once, run single)
+            const crypto=require("crypto");
+            const hash=crypto.createHash("sha256").update(code+"|"+q.id+"|"+mode+"|v2-index").digest("hex").slice(0,16);
+            const cacheDir=path.join(os.tmpdir(),"dsa_cache");
+            try{fs.mkdirSync(cacheDir,{recursive:true});}catch{}
+            const exe=path.join(cacheDir,`dsa_${hash}.exe`);
+            if(!fs.existsSync(exe)){
+              // compile batch exe on-demand (same driver as stream, with index support)
+              const fnName=q.cppFunctionName||q.functionName;
+              const params=q.params;
+              const batchDecls=params.map(p=>{ const v=all[0].input[p]; return `vector<${cppTypeFor(v)}> _batch_${p} = {${all.map(t=>jsonToCppLiteral(t.input[p])).join(", ")}};`; }).join("\n  ");
+              const n=all.length;
+              const hasInclude=code.includes("#include");
+              const header=hasInclude?"":'#include <bits/stdc++.h>\nusing namespace std;\n';
+              const printHelpers=`\ntemplate<typename T> void printJsonVal(const T& v);\nvoid printJsonVal(int v){ cout << v; }\nvoid printJsonVal(double v){ cout << v; }\nvoid printJsonVal(bool v){ cout << (v?"true":"false"); }\nvoid printJsonVal(const string& v){ cout << '"' << v << '"'; }\nvoid printJsonVal(char v){ cout << '"' << v << '"'; }\ntemplate<typename T> void printJsonVal(const vector<T>& v){ cout << "["; for(size_t i=0;i<v.size();++i){ if(i) cout << ","; printJsonVal(v[i]); } cout << "]"; }\n`;
+              const isComp=all[0].expectedOutput && typeof all[0].expectedOutput==="object" && !Array.isArray(all[0].expectedOutput) && ("k" in all[0].expectedOutput);
+              const isInP=q.id==="reverse-string"||q.id==="move-zeroes";
+              const idxSup=`int _s=0,_e=${n}; if(argc>1){_s=atoi(argv[1]); _e=_s+1; if(_s<0||_s>=${n}) return 0;}`;
+              let driver;
+              if(isComp) driver=`\nint main(int argc,char**argv){\n ${batchDecls}\n ${idxSup}\n for(int i=_s;i<_e;i++){ auto _k=${fnName}(_batch_${params[0]}[i]); cout<<"{\\"k\\":"<<_k<<",\\"${params[0]}\\":"; printJsonVal(_batch_${params[0]}[i]); cout<<"}"<<endl; } return 0;}\n`;
+              else if(isInP) driver=`\nint main(int argc,char**argv){\n ${batchDecls}\n ${idxSup}\n for(int i=_s;i<_e;i++){ ${fnName}(_batch_${params[0]}[i]); printJsonVal(_batch_${params[0]}[i]); cout<<endl; } return 0;}\n`;
+              else driver=`\nint main(int argc,char**argv){\n ${batchDecls}\n ${idxSup}\n for(int i=_s;i<_e;i++){ auto _ret=${fnName}(${params.map(p=>`_batch_${p}[i]`).join(", ")}); printJsonVal(_ret); cout<<endl; } return 0;}\n`;
+              const tmpCpp=path.join(os.tmpdir(),`dsa_case_${Date.now()}.cpp`);
+              fs.writeFileSync(tmpCpp, header+"\n"+code+"\n"+printHelpers+"\n"+driver, "utf8");
+              const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","g++"];
+              let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
+              let cErr="";
+              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0",tmpCpp,"-o",exe]); c.stderr.on("data",d=>cErr+=d); c.on("close",cc=>cc===0?rs():rj(new Error("Compile Error:\\n"+cErr))); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
+              try{fs.unlinkSync(tmpCpp);}catch{}
+            }
+            const binDir=path.dirname(fs.existsSync("C:\\mingw64\\bin\\g++.exe")?"C:\\mingw64\\bin\\g++.exe":"g++");
+            // find actual compiler dir for DLLs
+            let cdir="C:\\mingw64\\bin"; try{ if(!fs.existsSync(exe)) throw 0; }catch{}
+            const runEnv={...process.env, PATH: cdir+path.delimiter+process.env.PATH};
+            const out=await new Promise((rs,rj)=>{
+              const r=spawn(exe,[String(index)],{env:runEnv});
+              let o="",e=""; r.stdout.on("data",d=>o+=d); r.stderr.on("data",d=>e+=d);
+              const t=setTimeout(()=>{try{r.kill();}catch{}; rj(new Error("Time Limit Exceeded"));},3000);
+              r.on("close",c=>{clearTimeout(t); if(c!==0) return rj(new Error(e||`exit ${c}`)); try{rs(JSON.parse(o.trim().split("\n")[0]));}catch{ rj(new Error("Invalid output: "+o)); }});
+              r.on("error",rj);
+            });
+            actual=out;
+          } else throw new Error("bad lang");
+          ok=deepEqual(actual, tc.expectedOutput, q.id);
+        }catch(e){ error=e.message; if(String(e.message).includes("Script execution timed out")) error="Time Limit Exceeded (JS >2s)"; }
+        return sendJson(res, { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs: Date.now()-start, index }, 200);
+      }catch(e){ return sendJson(res, { error: e.message }, 500); }
     });
     return;
   }
@@ -1099,4 +1269,12 @@ server.listen(PORT, async () => {
   const qs = await loadQuestions();
   console.log(`DSA Practice running at http://localhost:${PORT}`);
   console.log(`Questions: ${qs.length} loaded from ${useDb && dbReady ? "MySQL "+process.env.DB_HOST : QUESTIONS_DIR}`);
+  // warm g++ (Hikari-like: keep compiler ready, 2 workers conceptually)
+  try{
+    const { spawn: _sp } = require("child_process");
+    const _c = _sp("C:\\mingw64\\bin\\g++.exe", ["--version"]);
+    _c.on("close",()=>console.log("g++ warmed (C:\\mingw64)"));
+    _c.on("error",()=>{ const _c2=_sp("g++",["--version"]); _c2.on("close",()=>console.log("g++ warmed (PATH)")); });
+  }catch{}
+  try{ const { getCompilePool } = require("./server/utils/compilePool"); getCompilePool(); }catch(e){ console.warn("compile pool warmup skipped", e.message); }
 });
