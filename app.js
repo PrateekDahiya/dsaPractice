@@ -84,9 +84,10 @@ function updateTopbar(user){
       clearAuth();
       updateTopbar(null);
       toast("Logged out");
-      solvedSet.clear(); attemptedSet.clear();
+      solvedSet.clear(); attemptedSet.clear(); manualSet.clear();
       renderList();
       renderHistory();
+      if(currentQuestion) renderProblem();
     });
   } else {
     if(navDash) navDash.classList.add("hidden");
@@ -150,11 +151,12 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
-// solved/attempted sets
+// solved/attempted/manual sets
 let solvedSet = new Set();
 let attemptedSet = new Set();
+let manualSet = new Set();
 async function refreshSolvedState(){
-  solvedSet.clear(); attemptedSet.clear();
+  solvedSet.clear(); attemptedSet.clear(); manualSet.clear();
   const t = getToken();
   if(!t) return;
   try{
@@ -163,6 +165,13 @@ async function refreshSolvedState(){
       const ids = await r1.json();
       if(Array.isArray(ids)) ids.forEach(id=>solvedSet.add(id));
     }
+    try {
+      const rm = await apiFetch("/api/manual-solved");
+      if(rm.ok){
+        const mids = await rm.json();
+        if(Array.isArray(mids)) mids.forEach(id=>{ manualSet.add(id); solvedSet.add(id); });
+      }
+    } catch {}
     const r2 = await apiFetch("/api/submissions?limit=100");
     if(r2.ok){
       const subs = await r2.json();
@@ -173,6 +182,31 @@ async function refreshSolvedState(){
       }
     }
   }catch{}
+}
+async function toggleMarkDone(){
+  if(!currentQuestion) return;
+  const t = getToken();
+  if(!t){ toast("Login to mark as done"); return; }
+  const qid = currentQuestion.id;
+  const isMarked = manualSet.has(qid);
+  const btn = document.getElementById("mark-done-btn");
+  if(btn){ btn.disabled = true; btn.textContent = isMarked ? "Unmarking..." : "Marking..."; }
+  try{
+    const res = await apiFetch(`/api/questions/${encodeURIComponent(qid)}/mark-done`, {
+      method: isMarked ? "DELETE" : "POST"
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || "failed");
+    if(isMarked) manualSet.delete(qid);
+    else manualSet.add(qid);
+    await refreshSolvedState();
+    renderProblem();
+    renderList();
+    toast(isMarked ? "Unmarked — back to attempted" : "Marked as done");
+  }catch(e){
+    toast("Failed: " + e.message);
+    renderProblem();
+  }
 }
 
 async function fetchQuestions() {
@@ -244,11 +278,14 @@ function renderList() {
   if(countEl) countEl.textContent = `${filtered.length} problems`;
   questionListEl.innerHTML = filtered.map(q => {
     let indicator="";
-    if(solvedSet.has(q.id)) indicator = `<span class="q-indicator solved" title="Solved"><span class="dot-sm"></span> Solved</span>`;
+    if(solvedSet.has(q.id)) {
+      const isMan = manualSet.has(q.id);
+      indicator = `<span class="q-indicator solved" title="${isMan ? "Manually marked done" : "Solved"}"><span class="dot-sm"></span> ${isMan ? "Done" : "Solved"}</span>`;
+    }
     else if(attemptedSet.has(q.id)) indicator = `<span class="q-indicator attempted" title="Attempted"><span class="dot-sm"></span> Attempted</span>`;
     return `
     <div class="question-item ${currentQuestion && currentQuestion.id===q.id ? 'active':''}" data-id="${esc(q.id)}">
-      <div class="q-title">${esc(q.title)} ${solvedSet.has(q.id) ? '<span style="color:#00b8a3;margin-left:6px">✓</span>' : attemptedSet.has(q.id) ? '<span style="color:#ffa116;margin-left:6px">●</span>' : ''}</div>
+      <div class="q-title">${esc(q.title)}</div>
       <div class="q-meta">
         <span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span>
         <span>${(q.tags||[]).join(" · ")}</span>
@@ -291,11 +328,20 @@ async function loadQuestion(id) {
 function renderProblem() {
   if (!currentQuestion || !problemViewEl) return;
   const q = currentQuestion;
+  const isSolved = solvedSet.has(q.id);
+  const isManual = manualSet.has(q.id);
+  const markBtnHtml = (() => {
+    if(!getToken()) return "";
+    if(isManual) return `<button id="mark-done-btn" class="btn secondary" style="padding:6px 12px;font-size:12px" title="Remove manual override">Marked Done (Undo)</button>`;
+    if(isSolved) return `<span style="color:var(--green);font-size:12px;font-weight:700">Solved</span>`;
+    return `<button id="mark-done-btn" class="btn ghost" style="padding:6px 12px;font-size:12px" title="Mark as done even if tests fail (e.g. wrong test case)">Mark as Done</button>`;
+  })();
   problemViewEl.innerHTML = `
     <div class="problem-title">${esc(q.title)}</div>
     <div class="problem-meta">
       <span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span>
       <span style="color:var(--muted);font-size:13px">${(q.tags||[]).join(" · ")}</span>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${markBtnHtml}</span>
     </div>
     <div class="problem-statement">${q.problemStatement}</div>
     ${q.examples ? `<div class="examples"><h3>Examples</h3>${q.examples.map((ex,i)=>`
@@ -309,6 +355,8 @@ function renderProblem() {
       <p style="color:var(--muted);font-size:13px">Visible: ${q.visibleTestCases.length} · Hidden: ${q.hiddenTestCases.length} (only on Submit)</p>
     </div>
   `;
+  const markBtn = document.getElementById("mark-done-btn");
+  if(markBtn) markBtn.addEventListener("click", toggleMarkDone);
 }
 
 function isCppCode(code){ return /#include|using namespace std|vector<|int\s+\w+\s*\(/.test(code); }
@@ -1065,7 +1113,7 @@ if(validateBtn) validateBtn.addEventListener("click", () => {
       jsonError.textContent = "Validation failed:\n- " + errs.join("\n- ");
       jsonError.classList.remove("hidden","ok");
     } else {
-      jsonError.textContent = "✓ Valid JSON — ready to save.";
+      jsonError.textContent = "Valid JSON — ready to save.";
       jsonError.classList.remove("hidden"); jsonError.classList.add("ok");
     }
     jsonError.classList.remove("hidden");
@@ -1104,7 +1152,7 @@ document.getElementById("form-to-json-btn")?.addEventListener("click", () => {
     document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
     document.querySelector('[data-tab="json"]').classList.add("active");
     $("#tab-json").classList.add("active");
-    jsonError.textContent = "✓ Generated from form. Review and Save.";
+    jsonError.textContent = "Generated from form. Review and Save.";
     jsonError.classList.remove("hidden"); jsonError.classList.add("ok");
     toast("Generated JSON from form");
   } catch (e) {
@@ -1132,7 +1180,7 @@ if(saveBtn) saveBtn.addEventListener("click", async () => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "save failed");
-    toast(`Saved ${q.id}.json ✓`);
+    toast(`Saved ${q.id}.json`);
     closeModal();
     await fetchQuestions(); renderList();
     await loadQuestion(q.id);

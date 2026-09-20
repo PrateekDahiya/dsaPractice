@@ -143,7 +143,7 @@
         const err=$("#json-error-page");
         const errs=validateQuestion(q);
         if(errs.length){ err.textContent="Fix: "+errs.join("; "); err.classList.remove("hidden","ok"); }
-        else { err.textContent="✓ Valid — ready to save"; err.classList.remove("hidden"); err.classList.add("ok"); }
+        else { err.textContent="Valid — ready to save"; err.classList.remove("hidden"); err.classList.add("ok"); }
       }catch(e){ const err=$("#json-error-page"); err.textContent="Form error: "+e.message; err.classList.remove("hidden"); }
     }
     // auto update preview on input
@@ -169,7 +169,7 @@
       fillPreview();
     });
     $("#validate-page").addEventListener("click", ()=>{
-      try{ const q=JSON.parse($("#json-preview-page").value); const errs=validateQuestion(q); const el=$("#json-error-page"); if(errs.length){ el.textContent="Invalid: "+errs.join("; "); el.classList.remove("ok"); el.classList.remove("hidden"); } else { el.textContent="✓ Valid"; el.classList.add("ok"); el.classList.remove("hidden"); } }catch(e){ const el=$("#json-error-page"); el.textContent="Invalid JSON: "+e.message; el.classList.remove("hidden"); }
+      try{ const q=JSON.parse($("#json-preview-page").value); const errs=validateQuestion(q); const el=$("#json-error-page"); if(errs.length){ el.textContent="Invalid: "+errs.join("; "); el.classList.remove("ok"); el.classList.remove("hidden"); } else { el.textContent="Valid"; el.classList.add("ok"); el.classList.remove("hidden"); } }catch(e){ const el=$("#json-error-page"); el.textContent="Invalid JSON: "+e.message; el.classList.remove("hidden"); }
     });
     $("#import-file-page").addEventListener("change", async (e)=>{
       const f=e.target.files[0]; if(!f) return;
@@ -192,7 +192,7 @@
         const res=await fetch("/api/questions",{method:"POST",headers:{...authHeaders({"Content-Type":"application/json"})},body:JSON.stringify(q)});
         const data=await res.json();
         if(!res.ok) throw new Error(data.error||"save failed");
-        toast("Saved "+q.id+" ✓");
+        toast("Saved "+q.id);
         setTimeout(()=> location.href="index.html#"+q.id, 800);
       }catch(e){
         const el=$("#json-error-page"); el.textContent="Save failed: "+e.message; el.classList.remove("hidden");

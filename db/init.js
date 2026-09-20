@@ -95,6 +95,16 @@ async function initDb() {
   try { await pool.query(`ALTER TABLE questions ADD COLUMN addedByUsername VARCHAR(50) NULL`); } catch {}
   try { await pool.query(`ALTER TABLE questions ADD INDEX idx_addedBy (addedBy)`); } catch {}
   try { await pool.query(`ALTER TABLE questions ADD CONSTRAINT fk_questions_addedBy FOREIGN KEY (addedBy) REFERENCES users(id) ON DELETE SET NULL`); } catch {}
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS manual_solved (
+      userId INT NOT NULL,
+      questionId VARCHAR(100) NOT NULL,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (userId, questionId),
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (questionId) REFERENCES questions(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
   // Hikari-like warmup: pre-create 3 idle connections
   try {
     const { warmPool } = require('./pool');

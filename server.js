@@ -984,6 +984,39 @@ const server = http.createServer(async (req, res) => {
     if (useDb) { await ensureDb(); if (dbReady) rows = await db.dbGetSubmissions(qid||null, Math.min(limit,100), userId); }
     return sendJson(res, rows, 200);
   }
+  // Manual mark-as-done (override for wrong test cases)
+  if (pathname === "/api/manual-solved" && req.method === "GET") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      const ids = db.getManualSolvedIds ? await db.getManualSolvedIds(u.id) : [];
+      return sendJson(res, ids, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname.match(/^\/api\/questions\/[^/]+\/mark-done$/) && (req.method === "POST" || req.method === "DELETE")) {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    const parts = pathname.split("/").filter(Boolean);
+    const qid = decodeURIComponent(parts[2]);
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      const q = await getQuestionById(qid);
+      if (!q) return sendJson(res, { error: "Question not found" }, 404);
+      if (req.method === "POST") {
+        await db.markDone(u.id, qid);
+        cache.leaderboard.clear();
+        if (db.clearStatsCache) db.clearStatsCache(u.id);
+        return sendJson(res, { ok: true, marked: true }, 200);
+      } else {
+        await db.unmarkDone(u.id, qid);
+        cache.leaderboard.clear();
+        if (db.clearStatsCache) db.clearStatsCache(u.id);
+        return sendJson(res, { ok: true, marked: false }, 200);
+      }
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   // Streaming execute — sends each test case as it finishes (SSE-like NDJSON)
   if (pathname === "/api/execute/stream" && req.method === "POST") {
     let body = "";
