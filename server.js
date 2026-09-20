@@ -427,10 +427,208 @@ int main(){
   });
 }
 
+async function runPythonBatch(code, question, testCases) {
+  const fnName = question.pythonFunctionName || question.functionName;
+  const tmpFile = path.join(os.tmpdir(), `dsa_${Date.now()}_${Math.random().toString(36).slice(2)}.py`);
+  const isComposite = testCases[0] && testCases[0].expectedOutput && typeof testCases[0].expectedOutput === "object" && !Array.isArray(testCases[0].expectedOutput) && ("k" in testCases[0].expectedOutput);
+  const isReverse = question.id === "reverse-string";
+  const casesJson = JSON.stringify(testCases.map(tc => ({ input: tc.input, expected: tc.expectedOutput, id: tc.id })));
+  let driver;
+  if (isComposite) {
+    driver = `
+import json, sys
+cases = json.loads('''${casesJson.replace(/'/g, "\\'")}''')
+for tc in cases:
+    inp = tc["input"]
+    _ret = ${fnName}(**inp)
+    _actual = {"k": _ret, "${question.params[0]}": inp["${question.params[0]}"] if "_ret" is not None else inp["${question.params[0]}"]}
+    # handle in-place where _ret is k and inp mutated
+    if isinstance(inp["${question.params[0]}"], list) and _ret is not None:
+        # for removeDuplicates, inp is mutated by call, need to use the same list object
+        pass
+    print(json.dumps(_actual))
+`;
+    // Actually for in-place we need to capture mutated list: we passed inp dict, but function may mutate the list object inside inp
+    // So we need to keep reference
+    driver = `
+import json
+cases = json.loads('''${casesJson.replace(/'/g, "\\'")}''')
+for tc in cases:
+    inp = {k: list(v) if isinstance(v, list) else v for k,v in tc["input"].items()}
+    _ret = ${fnName}(**inp)
+    _actual = {"k": _ret, "${question.params[0]}": inp["${question.params[0]}"]}
+    print(json.dumps(_actual))
+`;
+  } else if (isReverse) {
+    driver = `
+import json
+cases = json.loads('''${casesJson.replace(/'/g, "\\'")}''')
+for tc in cases:
+    inp = {k: list(v) if isinstance(v, list) else v for k,v in tc["input"].items()}
+    _ret = ${fnName}(**inp)
+    if _ret is None:
+        _ret = inp["${question.params[0]}"]
+    print(json.dumps(_ret))
+`;
+  } else {
+    driver = `
+import json
+cases = json.loads('''${casesJson.replace(/'/g, "\\'")}''')
+for tc in cases:
+    _ret = ${fnName}(**tc["input"])
+    print(json.dumps(_ret))
+`;
+  }
+  const fileContent = code + "\n" + driver;
+  fs.writeFileSync(tmpFile, fileContent, "utf8");
+  return new Promise((resolve, reject) => {
+    const py = spawn("python", [tmpFile], { timeout: 8000 });
+    let stdout="", stderr="";
+    py.stdout.on("data", d=> stdout+=d); py.stderr.on("data", d=> stderr+=d);
+    py.on("error", err => {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      if (err.code === "ENOENT") {
+        const py3 = spawn("python3", [tmpFile], { timeout: 8000 });
+        let s2="", e2=""; py3.stdout.on("data", d=>s2+=d); py3.stderr.on("data", d=>e2+=d);
+        py3.on("close", code2 => { try{fs.unlinkSync(tmpFile);}catch{}; if(code2!==0) return reject(new Error(e2||`python3 exit ${code2}`)); const lines=s2.trim().split("\n").filter(Boolean); try{ resolve(lines.map(l=>JSON.parse(l))); }catch{ reject(new Error("Invalid python batch output: "+s2)) }});
+        py3.on("error", ()=> reject(new Error("python not found")));
+      } else reject(err);
+    });
+    py.on("close", code => {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      if (code!==0) return reject(new Error(stderr.trim()||`python exit ${code}`));
+      const lines = stdout.trim().split("\n").filter(Boolean);
+      try { resolve(lines.map(l=>JSON.parse(l))); } catch(e){ reject(new Error("Invalid python batch output: "+stdout)) }
+    });
+    setTimeout(()=>{ try{py.kill();}catch{}; reject(new Error("Time Limit Exceeded (python >8s)")); },8500);
+  });
+}
+
+async function runCppBatch(code, question, testCases) {
+  const fnName = question.cppFunctionName || question.functionName;
+  const params = question.params;
+  const isReverse = question.id === "reverse-string";
+  const isComposite = testCases[0] && testCases[0].expectedOutput && typeof testCases[0].expectedOutput === "object" && !Array.isArray(testCases[0].expectedOutput) && ("k" in testCases[0].expectedOutput);
+  const isInPlaceVoid = isReverse || question.id === "move-zeroes" || question.id === "move-zero";
+  // Build batch vectors per param
+  const batchDecls = params.map(p => {
+    const firstVal = testCases[0].input[p];
+    const baseType = cppTypeFor(firstVal);
+    const batchType = `vector<${baseType}>`;
+    // for vector<int> nums, batch is vector<vector<int>>
+    // for int target, batch is vector<int>
+    const lits = testCases.map(tc => jsonToCppLiteral(tc.input[p])).join(", ");
+    return `${batchType} _batch_${p} = {${lits}};`;
+  }).join("\n  ");
+  const n = testCases.length;
+  const tmpCpp = path.join(os.tmpdir(), `dsa_${Date.now()}_${Math.random().toString(36).slice(2)}.cpp`);
+  const exe = tmpCpp.replace(/\.cpp$/, os.platform()==="win32"?".exe":".out");
+  const hasInclude = code.includes("#include");
+  const header = hasInclude ? "" : '#include <bits/stdc++.h>\nusing namespace std;\n';
+  const printHelpers = `\ntemplate<typename T> void printJsonVal(const T& v);\nvoid printJsonVal(int v){ cout << v; }\nvoid printJsonVal(double v){ cout << v; }\nvoid printJsonVal(bool v){ cout << (v?"true":"false"); }\nvoid printJsonVal(const string& v){ cout << '"' << v << '"'; }\nvoid printJsonVal(char v){ cout << '"' << v << '"'; }\ntemplate<typename T> void printJsonVal(const vector<T>& v){ cout << "["; for(size_t i=0;i<v.size();++i){ if(i) cout << ","; printJsonVal(v[i]); } cout << "]"; }\n`;
+  let driver;
+  if (isComposite) {
+    driver = `
+int main(){
+  ${batchDecls}
+  for(int i=0;i<${n};i++){
+    auto _k = ${fnName}(_batch_${params[0]}[i]${params.length>1 ? ", " + params.slice(1).map(p=>`_batch_${p}[i]`).join(", ") : ""});
+    cout << "{\\"k\\":" << _k << ",\\"${params[0]}\\":";
+    printJsonVal(_batch_${params[0]}[i]);
+    cout << "}";
+    if(i+1<${n}) cout << "\\n";
+  }
+  cout << endl;
+  return 0;
+}
+`;
+  } else if (isInPlaceVoid) {
+    driver = `
+int main(){
+  ${batchDecls}
+  for(int i=0;i<${n};i++){
+    ${fnName}(_batch_${params[0]}[i]${params.length>1 ? ", " + params.slice(1).map(p=>`_batch_${p}[i]`).join(", ") : ""});
+    printJsonVal(_batch_${params[0]}[i]);
+    if(i+1<${n}) cout << "\\n";
+  }
+  cout << endl;
+  return 0;
+}
+`;
+  } else {
+    // generic with multiple params
+    const callArgs = params.map(p=>`_batch_${p}[i]`).join(", ");
+    driver = `
+int main(){
+  ${batchDecls}
+  for(int i=0;i<${n};i++){
+    auto _ret = ${fnName}(${callArgs});
+    printJsonVal(_ret);
+    if(i+1<${n}) cout << "\\n";
+  }
+  cout << endl;
+  return 0;
+}
+`;
+  }
+  const fileContent = header + "\n" + code + "\n" + printHelpers + "\n" + driver;
+  fs.writeFileSync(tmpCpp, fileContent, "utf8");
+  const localGpps = [path.join(ROOT,"tools","mingw64","bin","g++.exe"),path.join(ROOT,"tools","w64devkit","bin","g++.exe"),path.join(ROOT,"tools","gcc","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","C:\\tools\\mingw64\\bin\\g++.exe","C:\\tools\\w64devkit\\bin\\g++.exe"];
+  let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
+  return new Promise((resolve, reject) => {
+    const compile = spawn(compiler, ["-std=c++17","-O0",tmpCpp,"-o",exe]);
+    let cErr=""; compile.stderr.on("data",d=>cErr+=d);
+    compile.on("error", err=>{ try{fs.unlinkSync(tmpCpp);}catch{}; if(err.code==="ENOENT") return reject(new Error("g++ not found")); reject(new Error("Compile spawn error: "+err.message)); });
+    compile.on("close", cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
+      const binDir=path.dirname(compiler); const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
+      const run=spawn(exe, [], {timeout:8000, env: runEnv});
+      let out="", rErr=""; run.stdout.on("data",d=>out+=d); run.stderr.on("data",d=>rErr+=d);
+      const killTimer=setTimeout(()=>{try{run.kill();}catch{}; reject(new Error("Time Limit Exceeded (C++ >8s)"));},8500);
+      run.on("close", rCode=>{ clearTimeout(killTimer); try{fs.unlinkSync(tmpCpp);}catch{}; try{fs.unlinkSync(exe);}catch{}; if(rCode!==0) return reject(new Error(rErr.trim()||`Runtime exit ${rCode}: ${out}`)); const lines=out.trim().split("\n").filter(Boolean); try{ resolve(lines.map(l=>JSON.parse(l))); }catch{ reject(new Error("Invalid C++ batch output (not JSON): "+out.trim())) } });
+      run.on("error", e=>{ clearTimeout(killTimer); reject(new Error("Run error: "+e.message)); });
+    });
+  });
+}
+
 async function executeQuestion(question, code, language) {
   const testCases = question._testCasesForMode;
   const results = [];
   let passed = 0;
+  // batch for cpp/python (compile once), js keep per-case (fast vm)
+  if (language === "cpp" && testCases.length > 1) {
+    const startAll = Date.now();
+    try {
+      const actuals = await runCppBatch(code, question, testCases);
+      for (let i=0;i<testCases.length;i++) {
+        const tc=testCases[i];
+        const actual=actuals[i];
+        const ok=deepEqual(actual, tc.expectedOutput, question.id);
+        if(ok) passed++;
+        results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length)});
+      }
+    } catch (e) {
+      const msg=e.message;
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0});
+    }
+    return { total: testCases.length, passed, results };
+  }
+  if (language === "python" && testCases.length > 1) {
+    const startAll = Date.now();
+    try {
+      const actuals = await runPythonBatch(code, question, testCases);
+      for (let i=0;i<testCases.length;i++) {
+        const tc=testCases[i];
+        const actual=actuals[i];
+        const ok=deepEqual(actual, tc.expectedOutput, question.id);
+        if(ok) passed++;
+        results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length)});
+      }
+    } catch (e) {
+      const msg=e.message;
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0});
+    }
+    return { total: testCases.length, passed, results };
+  }
   for (const tc of testCases) {
     const start = Date.now();
     let actual, error = null;
@@ -785,6 +983,61 @@ const server = http.createServer(async (req, res) => {
     const userId = req.user ? req.user.id : null;
     if (useDb) { await ensureDb(); if (dbReady) rows = await db.dbGetSubmissions(qid||null, Math.min(limit,100), userId); }
     return sendJson(res, rows, 200);
+  }
+  // Streaming execute — sends each test case as it finishes (SSE-like NDJSON)
+  if (pathname === "/api/execute/stream" && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { questionId, code, language, mode } = JSON.parse(body || "{}");
+        if (!questionId || !code || !language || !mode) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Missing fields"})); }
+        if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"bad request"})); }
+        const q = await getQuestionById(questionId);
+        if (!q) { res.writeHead(404, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Question not found"})); }
+        const visible = q.visibleTestCases.map(tc=>({...tc,_hidden:false}));
+        const hidden = q.hiddenTestCases.map(tc=>({...tc,_hidden:true}));
+        q._testCasesForMode = mode==="run"?visible:[...visible,...hidden];
+        const testCases = q._testCasesForMode;
+        res.writeHead(200, {"Content-Type":"text/event-stream","Cache-Control":"no-cache","Connection":"keep-alive","Access-Control-Allow-Origin":"*"});
+        res.write(`event: start\ndata: ${JSON.stringify({mode, total:testCases.length})}\n\n`);
+        // Use batch for cpp/python but stream per case after batch returns? For true streaming, run per-case and flush each.
+        // For JS, per-case is already fast. For cpp/python batch, we still get all at once, so we simulate streaming by iterating after batch.
+        // To keep streaming granular, we run per-case sequentially and flush each.
+        let passed=0;
+        const sendOne = (tc, actual, error, timeMs) => {
+          const ok = !error && deepEqual(actual, tc.expectedOutput, q.id);
+          if(ok) passed++;
+          const payload = { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs };
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+          return ok;
+        };
+        if (language==="javascript") {
+          for(const tc of testCases){
+            const start=Date.now(); let actual, err=null;
+            try{ actual=runJS(code,q,tc.input,tc.expectedOutput); }catch(e){ err=e.message; if(String(e.message).includes("Script execution timed out")) err="Time Limit Exceeded (JS >2s)"; }
+            sendOne(tc, actual, err, Date.now()-start);
+          }
+        } else if (language==="python") {
+          try{
+            const actuals = await runPythonBatch(code,q,testCases);
+            for(let i=0;i<testCases.length;i++) sendOne(testCases[i], actuals[i], null, 0);
+          }catch(e){
+            for(const tc of testCases) sendOne(tc, null, e.message, 0);
+          }
+        } else if (language==="cpp") {
+          try{
+            const actuals = await runCppBatch(code,q,testCases);
+            for(let i=0;i<testCases.length;i++) sendOne(testCases[i], actuals[i], null, 0);
+          }catch(e){
+            for(const tc of testCases) sendOne(tc, null, e.message, 0);
+          }
+        }
+        res.write(`event: done\ndata: ${JSON.stringify({passed, total:testCases.length})}\n\n`);
+        res.end();
+      } catch(e){ try{ res.writeHead(500, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:e.message})); }catch{} }
+    });
+    return;
   }
   if (pathname === "/api/execute" && req.method === "POST") {
     let body = "";

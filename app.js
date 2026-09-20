@@ -810,6 +810,81 @@ async function execute(mode) {
   if(resultsEl) resultsEl.innerHTML = `<div class="loading">Executing ${mode==="run"?"visible":"all"} tests...</div>`;
   let payload = null;
   let execError = null;
+  // Try streaming first (SSE) — shows each case as it finishes
+  try {
+    const token = getToken();
+    const headers = { "Content-Type": "application/json" };
+    if(token) headers["Authorization"] = "Bearer "+token;
+    const res = await fetch("/api/execute/stream", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ questionId: currentQuestion.id, code, language: currentLang, mode })
+    });
+    if (res.ok && res.body && res.headers.get("content-type")?.includes("text/event-stream")) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let total = currentQuestion[mode==="run"?"visibleTestCases":"hiddenTestCases"] ? (currentQuestion.visibleTestCases.length + (mode==="submit"?currentQuestion.hiddenTestCases.length:0)) : 0;
+      let results = [];
+      let passed = 0;
+      // init streaming UI
+      if(resultsEl) resultsEl.innerHTML = `<div class="results-header"><div class="results-title">${mode==="run"?"Run — Visible Tests":"Submit — All Tests"} (streaming...)</div><span class="results-summary">0 / ${total}</span></div><div id="stream-results"></div>`;
+      const streamContainer = document.getElementById("stream-results");
+      const appendCase = (r, idx) => {
+        const div = document.createElement("div");
+        div.className = "test-case open";
+        div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:JSON.stringify(r.actual,null,2))}</pre></span></div></div>`;
+        if(streamContainer) streamContainer.appendChild(div);
+        // update header count
+        const hdr = resultsEl.querySelector(".results-summary");
+        if(hdr) hdr.textContent = `${results.filter(x=>x.passed).length} / ${total} passed`;
+        if(statusText) statusText.textContent = `${results.filter(x=>x.passed).length}/${total} done`;
+      };
+      while(true){
+        const {done, value} = await reader.read();
+        if(done) break;
+        buffer += decoder.decode(value, {stream:true});
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop();
+        for(const part of parts){
+          const lines = part.split("\n");
+          let event = null, dataStr = null;
+          for(const line of lines){
+            if(line.startsWith("event: ")) event=line.slice(7).trim();
+            else if(line.startsWith("data: ")) dataStr=line.slice(6);
+          }
+          if(event==="start" && dataStr){
+            try{ const d=JSON.parse(dataStr); total=d.total||total; }catch{}
+          } else if(dataStr){
+            try{
+              const d=JSON.parse(dataStr);
+              if(d.testCaseId){
+                results.push(d);
+                appendCase(d, results.length-1);
+              } else if(d.passed!==undefined && d.total!==undefined && !d.testCaseId){
+                passed=d.passed; total=d.total;
+              }
+            }catch{}
+          }
+        }
+      }
+      // finalize
+      payload = { mode, total: results.length? results.length : total, passed: results.filter(r=>r.passed).length, results };
+      // re-render final summary properly
+      renderResults(payload);
+      hideLoader();
+      if(runBtn) { runBtn.disabled = false; runBtn.textContent = "Run"; }
+      if(submitBtn) submitBtn.disabled = false;
+      if(payload) saveHistoryEntry({ id: Date.now()+"_"+Math.random().toString(36).slice(2,6), ts: Date.now(), questionId: currentQuestion.id, title: currentQuestion.title, language: currentLang, mode, code, passed: payload.passed, total: payload.total, results: payload.results });
+      return;
+    } else {
+      // not streaming, fallback to normal
+      throw new Error("no stream");
+    }
+  } catch (e) {
+    // fallback to normal /api/execute
+    console.log("stream not available, fallback", String(e).slice(0,100));
+  }
   try {
     const res = await apiFetch("/api/execute", {
       method: "POST",
