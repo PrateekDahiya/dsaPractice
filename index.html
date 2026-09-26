@@ -100,7 +100,7 @@
           </div>
         </div>
         <div id="editor-top" class="editor-top">
-          <textarea id="code-editor" spellcheck="false" placeholder="Select a problem to load starter code..."></textarea>
+          <div id="oe-wrap"><div id="oe-gutter" aria-hidden="true"></div><div id="oe-stack"><pre id="oe-hl" aria-hidden="true"></pre><textarea id="code-editor" spellcheck="false" placeholder="Select a problem to load starter code..."></textarea></div><div id="oe-suggest" class="hidden"></div><div id="oe-hover" class="hidden"></div></div>
         </div>
         <div id="editor-resizer" class="resizer horizontal"></div>
         <div id="editor-bottom" class="editor-bottom">
@@ -123,7 +123,10 @@
             </div>
           </div>
           <div class="submission-view-body" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
-            <pre id="submission-view-code" class="submission-code" style="flex:1;overflow:auto;margin:0"></pre>
+            <div id="submission-view-code-wrap" style="flex:1;display:flex;min-height:0;overflow:hidden;position:relative;background:#0f1117">
+              <div id="submission-view-hl" class="submission-code oe-highlight hidden" style="flex:1;overflow:auto;margin:0;display:none"></div>
+              <pre id="submission-view-code" class="submission-code oe-highlight" style="flex:1;overflow:auto;margin:0"></pre>
+            </div>
             <div id="submission-view-results" class="test-results" style="flex:1;border-top:1px solid var(--border)"></div>
           </div>
         </div>
@@ -188,6 +191,7 @@
     </div>
   </div>
 
+  <script src="public/js/own-editor.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -63,6 +63,18 @@ async function initDb() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS method_docs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      language ENUM('cpp','javascript','python') NOT NULL,
+      name VARCHAR(100) COLLATE utf8mb4_bin NOT NULL,
+      signature VARCHAR(255),
+      description TEXT NOT NULL,
+      usecase TEXT,
+      example TEXT,
+      UNIQUE KEY uniq_lang_name (language, name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bookmarks (
       userId INT NOT NULL,
       questionId VARCHAR(100) NOT NULL,
@@ -105,6 +117,10 @@ async function initDb() {
       FOREIGN KEY (questionId) REFERENCES questions(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+  try {
+    const { seedMethodDocs } = require('./methods');
+    await seedMethodDocs();
+  } catch (e) { console.warn('method docs seed skipped', e.message); }
   // Hikari-like warmup: pre-create 3 idle connections
   try {
     const { warmPool } = require('./pool');

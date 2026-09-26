@@ -18,6 +18,30 @@ let questions = [];
 let currentQuestion = null;
 let currentLang = "cpp";
 
+// ---------- Editor adapter (own-editor when active, CodeMirror compat, textarea fallback) ----------
+function getCode(){
+  if (window.__oe && window.__oeActive) { try { return window.__oe.getValue(); } catch {} }
+  if (window.__cm && window.__cmActive) { try { return window.__cm.getValue(); } catch {} }
+  return codeEditor ? codeEditor.value : "";
+}
+function setCode(v){
+  if (codeEditor) codeEditor.value = v;
+  if (window.__oe && window.__oeActive) { try { window.__oe.setValue(v); } catch {} }
+  if (window.__cm && window.__cmActive) { try { window.__cm.setValue(v); } catch {} }
+}
+function syncQuestionCtx(){
+  window.__cmLang = currentLang;
+  if (currentQuestion) {
+    window.__questionCtx = {
+      functionName: currentQuestion.cppFunctionName || currentQuestion.functionName,
+      params: currentQuestion.params,
+    };
+  }
+  if (window.__cm && window.__cmActive) { try { window.__cm.setLanguage(currentLang); } catch {} }
+  if (window.__oe && typeof window.__oe.setLanguage === "function") { try { window.__oe.setLanguage(currentLang); } catch {} }
+}
+window.__onEditorInput = () => { try { saveCode(); scheduleDbSave(); } catch {} };
+
 // ---------- Auth helpers ----------
 function getToken(){ return localStorage.getItem("token"); }
 function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); } catch{ return null; } }
@@ -310,6 +334,7 @@ async function loadQuestion(id) {
       q = await r2.json();
     }
     currentQuestion = q;
+    syncQuestionCtx();
     renderProblem();
     await loadStarterCode();
     renderList();
@@ -369,7 +394,7 @@ async function loadStarterCode() {
     if (res.ok) {
       const data = await res.json();
       if (data.code !== null && data.code !== undefined) {
-        codeEditor.value = data.code;
+        setCode(data.code);
         localStorage.setItem(`code:${currentQuestion.id}:${currentLang}`, data.code);
         return;
       }
@@ -379,28 +404,28 @@ async function loadStarterCode() {
   if (saved !== null) {
     if (currentLang === "cpp" && isJsCode(saved) && !isCppCode(saved)) {
       localStorage.removeItem(`code:${currentQuestion.id}:${currentLang}`);
-      codeEditor.value = starter;
+      setCode(starter);
       return;
     }
     if (currentLang === "javascript" && isCppCode(saved) && !isJsCode(saved)) {
       localStorage.removeItem(`code:${currentQuestion.id}:${currentLang}`);
-      codeEditor.value = starter;
+      setCode(starter);
       return;
     }
-    codeEditor.value = saved;
+    setCode(saved);
   } else {
-    codeEditor.value = starter;
+    setCode(starter);
   }
 }
 
 function saveCode() {
   if (!currentQuestion || !codeEditor) return;
-  localStorage.setItem(`code:${currentQuestion.id}:${currentLang}`, codeEditor.value);
+  localStorage.setItem(`code:${currentQuestion.id}:${currentLang}`, getCode());
 }
 let lastDbSavedCode = "";
 async function saveCodeToDb() {
   if (!currentQuestion || !codeEditor) return;
-  const code = codeEditor.value;
+  const code = getCode();
   if (code === lastDbSavedCode) return;
   if (!code.trim()) return;
   try {
@@ -424,6 +449,7 @@ if(langSelect) langSelect.addEventListener("change", async () => {
   await saveCodeToDb();
   currentLang = langSelect.value;
   lastDbSavedCode = "";
+  syncQuestionCtx();
   if (currentQuestion) await loadStarterCode();
 });
 if(resetBtn) resetBtn.addEventListener("click", () => {
@@ -450,6 +476,7 @@ function getIndentSize() { return 4; }
 
 if(codeEditor){
 codeEditor.addEventListener("keydown", (e) => {
+  if (window.__cmActive || window.__oeActive) return; // CodeMirror / own-editor handles keys when active
   const start = codeEditor.selectionStart, end = codeEditor.selectionEnd;
   const val = codeEditor.value;
   if (e.key === "Tab") {
@@ -505,11 +532,8 @@ codeEditor.addEventListener("keydown", (e) => {
   }
   const pairs = { "{": "}", "(": ")", "[": "]", '"': '"', "'": "'" };
   if (pairs[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (val[end] === pairs[e.key] && e.key !== '"' && e.key !== "'") {
-      e.preventDefault();
-      codeEditor.selectionStart = codeEditor.selectionEnd = start + 1;
-      return;
-    }
+    // skip-over only for closers typed when next char is the same closer;
+    // never skip on openers (fixes: typing '(' before ')' must insert, not jump)
     if (e.key === '"' || e.key === "'") {
       const prev = val[start - 1];
       if (prev && /[a-zA-Z0-9_]/.test(prev)) return;
@@ -598,19 +622,22 @@ function formatCode(code) {
   return out.join("\n");
 }
 if(formatBtn) formatBtn.addEventListener("click", () => {
-  const before = codeEditor.value;
-  const pos = codeEditor.selectionStart;
+  const before = getCode();
+  const cmActive = !!((window.__cm && window.__cmActive) || window.__oeActive);
+  const pos = cmActive ? before.length : codeEditor.selectionStart;
   const beforeLines = before.slice(0, pos).split("\n");
   const lineIdx = beforeLines.length - 1;
   const col = beforeLines[beforeLines.length - 1].length;
   const formatted = formatCode(before);
-  codeEditor.value = formatted;
-  const newLines = formatted.split("\n");
-  const targetLine = Math.min(lineIdx, newLines.length - 1);
-  const newLineLen = newLines[targetLine].length;
-  const newCol = Math.min(col, newLineLen);
-  const newPos = newLines.slice(0, targetLine).join("\n").length + (targetLine > 0 ? 1 : 0) + newCol;
-  codeEditor.selectionStart = codeEditor.selectionEnd = Math.min(newPos, formatted.length);
+  setCode(formatted);
+  if (!cmActive) {
+    const newLines = formatted.split("\n");
+    const targetLine = Math.min(lineIdx, newLines.length - 1);
+    const newLineLen = newLines[targetLine].length;
+    const newCol = Math.min(col, newLineLen);
+    const newPos = newLines.slice(0, targetLine).join("\n").length + (targetLine > 0 ? 1 : 0) + newCol;
+    codeEditor.selectionStart = codeEditor.selectionEnd = Math.min(newPos, formatted.length);
+  }
   saveCode();
   toast("Formatted");
 });
@@ -648,7 +675,7 @@ function renderResults(payload) {
 
 async function localRun(mode) {
   if (!currentQuestion) { toast("Select a problem first"); return; }
-  const code = codeEditor.value;
+  const code = getCode();
   if (!code.trim()) { toast("Write some code first"); return; }
   if (currentLang !== "javascript") { toast("Local fallback only supports JavaScript. Run `node server.js` for Python/C++."); return; }
   const testCases = mode==="run" ? currentQuestion.visibleTestCases : [...currentQuestion.visibleTestCases, ...currentQuestion.hiddenTestCases];
@@ -784,8 +811,16 @@ function showSubmissionView(e){
   if(codeEl){
     if(isReadOnly){
       codeEl.textContent = "Read-only view — code hidden for other user";
+      if(window.__cmView) try{ window.__cmView.hide(); }catch{}
+      if(window.__oeView && typeof window.__oeView.hide === "function") try{ window.__oeView.hide(); }catch{}
     } else {
-      codeEl.textContent = (e.code||"").slice(0, 8000) + ((e.code||"").length>8000 ? "\n...truncated" : "");
+      const text = (e.code||"").slice(0, 8000) + ((e.code||"").length>8000 ? "\n...truncated" : "");
+      if(window.__cmView && window.__cmActive){
+        try{ window.__cmView.show(text, e.language); }catch{ codeEl.textContent = text; }
+      } else {
+        codeEl.textContent = text;
+      }
+      if(window.__oeView && typeof window.__oeView.show === "function") try{ window.__oeView.show(e.code, e.language); }catch{}
     }
   }
   if(resultsEl2){
@@ -810,7 +845,8 @@ function restoreSubmissionToEditor(e){
   if(window.__DASHBOARD_READONLY){ toast("Read-only — cannot restore"); return; }
   currentLang = e.language;
   if(langSelect) langSelect.value = currentLang;
-  if(codeEditor) codeEditor.value = e.code;
+  syncQuestionCtx();
+  setCode(e.code);
   saveCode();
   toast(`Restored ${e.language} code to editor`);
   showEditMode();
@@ -899,7 +935,7 @@ document.getElementById("export-history-btn")?.addEventListener("click", async (
 
 async function execute(mode) {
   if (!currentQuestion) { toast("Select a problem first"); return; }
-  const code = codeEditor.value;
+  const code = getCode();
   if (!code.trim()) { toast("Write some code first"); return; }
   saveCode();
   showLoader();
@@ -1236,6 +1272,8 @@ document.querySelectorAll(".ptab").forEach(btn=>{
           if(titleEl) titleEl.textContent = "No submission selected";
           if(metaEl) metaEl.textContent = "";
           if(codeEl) codeEl.textContent = "Select a submission from the left to view code & results here (no scroll needed).";
+          if(window.__oeView && typeof window.__oeView.hide === "function") try{ window.__oeView.hide(); }catch{}
+          if(window.__cmView) try{ window.__cmView.hide(); }catch{}
           if(resultsEl2) resultsEl2.innerHTML = "";
           const restoreBtn = document.getElementById("submission-restore-btn");
           if(restoreBtn) restoreBtn.style.display = "none";
