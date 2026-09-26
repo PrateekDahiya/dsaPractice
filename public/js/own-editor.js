@@ -880,6 +880,74 @@
     } catch (err) {}
   }, true);
 
+  /* Tab / Shift+Tab / smart Enter live on the textarea (target phase).
+   * The suggestion handler above runs on window capture first and stops
+   * propagation while the popup is open, so Enter/Tab accept there and
+   * never reach here in that state. app.js's legacy handler returns early
+   * while window.__oeActive is set, so there is no double handling. */
+  ta.addEventListener('keydown', function (e) {
+    if (composing) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      var start = ta.selectionStart, end = ta.selectionEnd;
+      var v = ta.value;
+      if (e.shiftKey) {
+        var before = v.substring(0, start);
+        var lineStart = before.lastIndexOf('\n') + 1;
+        var block = v.substring(lineStart, end);
+        var out = block.split('\n').map(function (l) { return l.replace(/^ {1,4}|\t/, ''); }).join('\n');
+        ta.value = v.substring(0, lineStart) + out + v.substring(end);
+        var removed = block.length - out.length;
+        ta.selectionStart = Math.max(lineStart, start - 4);
+        ta.selectionEnd = end - removed;
+      } else if (start !== end) {
+        var before2 = v.substring(0, start);
+        var ls2 = before2.lastIndexOf('\n') + 1;
+        var sel = v.substring(ls2, end);
+        var ind = sel.split('\n').map(function (l) { return '    ' + l; }).join('\n');
+        ta.value = v.substring(0, ls2) + ind + v.substring(end);
+        ta.selectionStart = start + 4;
+        ta.selectionEnd = end + (ind.length - sel.length);
+      } else {
+        ta.value = v.substring(0, start) + '    ' + v.substring(end);
+        ta.selectionStart = ta.selectionEnd = start + 4;
+      }
+      scheduleRender();
+      scheduleLint();
+      notifyDocChange();
+      fireEditorInput();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var s = ta.selectionStart, en = ta.selectionEnd;
+      var vv = ta.value;
+      var bef = vv.substring(0, s);
+      var aft = vv.substring(en);
+      var ls = bef.lastIndexOf('\n') + 1;
+      var line = bef.substring(ls);
+      var im = line.match(/^(\s*)/);
+      var indent = im ? im[1] : '';
+      var trimmed = line.trim();
+      var lastCh = trimmed.charAt(trimmed.length - 1);
+      var extra = (lastCh === '{' || lastCh === '(' || lastCh === '[') ? '    ' : '';
+      var next = aft.charAt(0);
+      if ((lastCh === '{' && next === '}') || (lastCh === '(' && next === ')')) {
+        ta.value = bef + '\n' + indent + extra + '\n' + indent + aft;
+        ta.selectionStart = ta.selectionEnd = bef.length + 1 + indent.length + extra.length;
+      } else {
+        var ins = '\n' + indent + extra;
+        ta.value = bef + ins + aft;
+        ta.selectionStart = ta.selectionEnd = bef.length + ins.length;
+      }
+      scheduleRender();
+      scheduleLint();
+      notifyDocChange();
+      fireEditorInput();
+    }
+  });
+
   /* ================= 4. hover / docs ================= */
   var docCache = new Map();
   function cacheSet(k, v) {
