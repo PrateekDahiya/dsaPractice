@@ -176,20 +176,81 @@ body {
 #menu-toggle { font-size: 16px; }
 #run-btn, #submit-btn { min-width: 72px; }
 .editor-top { flex: 1; display: flex; flex-direction: column; min-height: 120px; overflow: hidden; }
+/* own-editor: stacked highlight + transparent textarea */
+#oe-wrap { position: relative; display: flex; flex: 1; min-height: 120px; background: #0f1117; overflow: hidden; }
+#oe-gutter { padding: 12px 6px 12px 12px; font-family: var(--mono); font-size: 13px; line-height: 1.5; color: var(--muted); opacity: 0.55; text-align: right; user-select: none; white-space: pre; overflow: hidden; flex-shrink: 0; min-width: 3ch; background: #0f1117; }
+#oe-stack { position: relative; flex: 1; min-width: 0; min-height: 0; }
+#oe-hl, #code-editor { font-family: var(--mono); font-size: 13px; line-height: 1.5; tab-size: 4; padding: 12px; white-space: pre; overflow-wrap: normal; word-break: normal; }
+#oe-hl { position: absolute; inset: 0; margin: 0; overflow: hidden; pointer-events: none; color: #e6e8eb; background: transparent; }
+#oe-hl .oe-err, #oe-hl .oe-warn { pointer-events: auto; cursor: help; }
 #code-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   flex: 1;
   min-height: 120px;
-  background: #0f1117;
-  color: #e6e8eb;
+  background: transparent;
+  color: transparent;
+  caret-color: #e6e8eb;
   border: none;
   outline: none;
+  resize: none;
+  overflow: auto;
+  white-space: pre;
+}
+#code-editor::selection { background: rgba(255,161,22,0.35); }
+#code-editor::-moz-selection { background: rgba(255,161,22,0.35); }
+/* token colors (shared with submission highlight) */
+.oe-kw { color: var(--accent-hover); }
+.oe-str { color: var(--green); }
+.oe-com { color: var(--muted); font-style: italic; }
+.oe-num { color: #79c0ff; }
+.oe-fn { color: #e6e8eb; }
+.oe-pp { color: var(--muted); }
+.oe-type { color: var(--accent-hover); }
+.oe-op { color: #c9cdd6; }
+.oe-err { text-decoration: underline wavy var(--red); text-decoration-skip-ink: none; }
+.oe-warn { text-decoration: underline wavy var(--accent); text-decoration-skip-ink: none; }
+.oe-indent { background-image: linear-gradient(to right, rgba(154,160,173,.22) 0 1px, transparent 1px); background-repeat: no-repeat; background-size: 1px 100%; }
+/* suggest popup */
+#oe-suggest { position: absolute; z-index: 20; min-width: 180px; max-width: 320px; max-height: 220px; overflow-y: auto; background: #1e222c; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 4px; font-family: var(--mono); font-size: 13px; }
+#oe-suggest.hidden { display: none; }
+#oe-suggest .oe-sug-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#oe-suggest .oe-sug-item.active { background: #2a2f3a; color: var(--accent-hover); }
+#oe-suggest .oe-sug-item.selected { background: #2a2f3a; color: var(--accent-hover); }
+/* hover tooltip */
+#oe-hover { position: absolute; z-index: 21; max-width: 320px; background: #1e222c; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 8px 10px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+#oe-hover.hidden { display: none; }
+/* submission highlight reuses same token classes */
+.submission-code.oe-highlight { white-space: pre-wrap; word-break: break-all; }
+/* read-only submission highlight host — styled like #oe-hl (same mono font/metrics) */
+#submission-view-code-wrap { position: relative; flex: 1; display: flex; min-height: 0; overflow: hidden; background: #0f1117; }
+#submission-view-hl {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
   padding: 12px;
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.5;
-  resize: none;
   tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+  word-break: break-all;
+  color: #e6e8eb;
+  background: #0f1117;
 }
+#submission-view-hl.hidden { display: none !important; }
+#submission-view-hl .oe-kw, #submission-view-hl .oe-type { color: var(--accent-hover); }
+#submission-view-hl .oe-str { color: var(--green); }
+#submission-view-hl .oe-com { color: var(--muted); font-style: italic; }
+#submission-view-hl .oe-num { color: #79c0ff; }
+#submission-view-hl .oe-fn { color: #e6e8eb; }
+#submission-view-hl .oe-pp { color: var(--muted); }
+#submission-view-hl .oe-op { color: #c9cdd6; }
+#submission-view-hl .oe-err { text-decoration: underline wavy var(--red); text-decoration-skip-ink: none; }
+#submission-view-hl .oe-warn { text-decoration: underline wavy var(--accent); text-decoration-skip-ink: none; }
 .editor-bottom { flex: 1; display: flex; flex-direction: column; min-height: 120px; overflow: hidden; }
 .status-bar {
   display: flex;

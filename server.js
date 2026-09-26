@@ -1242,6 +1242,47 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
+  if (pathname === "/api/lint" && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { code, language } = JSON.parse(body || "{}");
+        if (code === undefined || !language) return sendJson(res, { error: "Missing fields: code, language" }, 400);
+        if (!["javascript", "python", "cpp"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
+        if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
+        const { lint } = require("./server/utils/lint");
+        const diagnostics = await lint(code, language, ROOT);
+        return sendJson(res, { diagnostics }, 200);
+      } catch (e) {
+        return sendJson(res, { error: e.message }, 500);
+      }
+    });
+    return;
+  }
+  if (pathname === "/api/methods" && req.method === "GET") {
+    const language = (url.searchParams.get("language") || "").toLowerCase();
+    const q = (url.searchParams.get("q") || "").trim();
+    const lim = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "10", 10) || 10, 1), 200);
+    if (!["cpp", "javascript", "python"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, [], 200);
+      const rows = await db.searchMethods(language, q, lim);
+      return sendJson(res, rows, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname.match(/^\/api\/methods\/[^/]+\/[^/]+$/) && req.method === "GET") {
+    const parts = pathname.split("/").filter(Boolean);
+    const language = decodeURIComponent(parts[2]).toLowerCase();
+    const name = decodeURIComponent(parts[3]);
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, null, 200);
+      const row = await db.getMethodDoc(language, name);
+      return sendJson(res, row, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname === "/api/execute" && req.method === "POST") {
     let body = "";
     req.on("data", chunk => body += chunk);

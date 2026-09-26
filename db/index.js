@@ -6,6 +6,7 @@ const { dbSaveCode, dbGetCode } = require('./code');
 const { dbCreateSubmission, dbGetSubmissions } = require('./submissions');
 const { getSolvedIds, getStats, getLeaderboard, getUserDashboard, clearStatsCache } = require('./stats');
 const { markDone, unmarkDone, getManualSolvedIds, isMarkedDone } = require('./manual');
+const { seedMethodDocs, searchMethods, getMethodDoc } = require('./methods');
 
 module.exports = {
   getPool, initDb, migrateFromFiles,
@@ -14,5 +15,6 @@ module.exports = {
   dbSaveCode, dbGetCode,
   dbCreateSubmission, dbGetSubmissions,
   getSolvedIds, getStats, getLeaderboard, getUserDashboard, clearStatsCache,
-  markDone, unmarkDone, getManualSolvedIds, isMarkedDone
+  markDone, unmarkDone, getManualSolvedIds, isMarkedDone,
+  seedMethodDocs, searchMethods, getMethodDoc
 };
