@@ -888,6 +888,62 @@
   ta.addEventListener('keydown', function (e) {
     if (composing) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    /* auto-close pairs + skip-over closers (textarea target phase; the
+     * window-capture suggest nav runs first and stops propagation while
+     * the popup is open, so Enter/Tab there never reach here) */
+    var ps0 = ta.selectionStart, pe0 = ta.selectionEnd;
+    var pv0 = ta.value;
+    /* skip-over: typing a closer that is already ahead just moves past it */
+    if ((e.key === '}' || e.key === ')' || e.key === ']') && pv0.charAt(pe0) === e.key) {
+      e.preventDefault();
+      ta.selectionStart = ta.selectionEnd = ps0 + 1;
+      scheduleRender();
+      scheduleLint();
+      notifyDocChange();
+      fireEditorInput();
+      return;
+    }
+    var pairs = { '{': '}', '(': ')', '[': ']', '"': '"', "'": "'" };
+    if (pairs[e.key]) {
+      var ps = ta.selectionStart, pe = ta.selectionEnd;
+      var pv = ta.value;
+      if (e.key === '"' || e.key === "'") {
+        var prev = pv.charAt(ps - 1);
+        if (prev && /[a-zA-Z0-9_]/.test(prev)) return; /* apostrophe in word: type normally */
+        if (pv.charAt(pe) === e.key && ps === pe) {
+          e.preventDefault();
+          ta.selectionStart = ta.selectionEnd = ps + 1;
+          scheduleRender();
+          scheduleLint();
+          notifyDocChange();
+          fireEditorInput();
+          return;
+        }
+      }
+      if ((e.key === '{' || e.key === '(' || e.key === '[' || e.key === '"' || e.key === "'") && ps === pe) {
+        e.preventDefault();
+        ta.value = pv.substring(0, ps) + e.key + pairs[e.key] + pv.substring(pe);
+        ta.selectionStart = ta.selectionEnd = ps + 1;
+        scheduleRender();
+        scheduleLint();
+        notifyDocChange();
+        fireEditorInput();
+        refreshSuggest(e.key);
+        return;
+      }
+      if ((e.key === '{' || e.key === '(' || e.key === '[') && ps !== pe) {
+        e.preventDefault(); /* wrap selection */
+        ta.value = pv.substring(0, ps) + e.key + pv.substring(ps, pe) + pairs[e.key] + pv.substring(pe);
+        ta.selectionStart = ps + 1;
+        ta.selectionEnd = pe + 1;
+        scheduleRender();
+        scheduleLint();
+        notifyDocChange();
+        fireEditorInput();
+        refreshSuggest(e.key);
+        return;
+      }
+    }
     if (e.key === 'Tab') {
       e.preventDefault();
       var start = ta.selectionStart, end = ta.selectionEnd;
