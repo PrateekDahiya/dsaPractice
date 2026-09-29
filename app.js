@@ -337,6 +337,7 @@ async function loadQuestion(id) {
     syncQuestionCtx();
     renderProblem();
     await loadStarterCode();
+    if (window.__oe && typeof window.__oe.resetUndo === "function") { try { window.__oe.resetUndo(); } catch {} }
     renderList();
     if(resultsEl) resultsEl.innerHTML = `<div style="color:var(--muted);font-size:13px">Hit <strong>Run</strong> to test visible cases, <strong>Submit</strong> for all.</div>`;
     if(statusText) statusText.textContent = `Loaded: ${q.title}`;

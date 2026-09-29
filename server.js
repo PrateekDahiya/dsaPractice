@@ -5,6 +5,7 @@ const path = require("path");
 const vm = require("vm");
 const { spawn } = require("child_process");
 const os = require("os");
+const crypto = require("crypto");
 let bcrypt = null;
 let jwt = null;
 try { bcrypt = require("bcryptjs"); } catch (e) { console.warn("bcryptjs not installed, auth will fallback"); }
@@ -31,6 +32,32 @@ try { db = require("./db"); } catch { db = null; }
 let dbReady = false;
 let useDb = !!db;
 let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
+// ---------- lint guards: single-flight + cache + rate limit (OOM fix for /api/lint) ----------
+const lintStats = { total: 0, cacheHits: 0, rateLimited: 0 };
+let lintInflightCpp = 0; // max 1 concurrent g++ lint process
+const lintCache = new Map(); // sha256(code+language) -> { diagnostics, ts }
+const LINT_CACHE_TTL_MS = 60 * 1000;
+const LINT_CACHE_MAX = 200;
+const lintRate = new Map(); // ip -> lastAcceptedMs
+const LINT_MIN_GAP_MS = 1200;
+function lintCacheKey(code, language) {
+  return crypto.createHash("sha256").update(language + "\0" + code).digest("hex");
+}
+function lintCacheGet(key) {
+  const e = lintCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > LINT_CACHE_TTL_MS) { try { lintCache.delete(key); } catch {} return null; }
+  return e.diagnostics;
+}
+function lintCacheSet(key, diagnostics) {
+  try {
+    if (!lintCache.has(key) && lintCache.size >= LINT_CACHE_MAX) {
+      const oldest = lintCache.keys().next().value;
+      if (oldest !== undefined) lintCache.delete(oldest);
+    }
+    lintCache.set(key, { diagnostics, ts: Date.now() });
+  } catch {}
+}
 async function ensureDb() {
   if (!useDb || dbReady) return dbReady;
   try {
@@ -691,6 +718,18 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
+  // ---------- Health (lint counters + memory) ----------
+  if (pathname === "/api/health" && req.method === "GET") {
+    const mem = process.memoryUsage();
+    return sendJson(res, {
+      ok: true,
+      heapMB: +(mem.heapUsed / 1048576).toFixed(1),
+      rssMB: +(mem.rss / 1048576).toFixed(1),
+      uptimeSec: Math.floor(process.uptime()),
+      lint: { inflight: lintInflightCpp, total: lintStats.total, cacheHits: lintStats.cacheHits, rateLimited: lintStats.rateLimited }
+    }, 200);
+  }
+
   // ---------- Auth APIs ----------
   if (pathname === "/api/auth/register" && req.method === "POST") {
     let body = "";
@@ -1244,16 +1283,49 @@ const server = http.createServer(async (req, res) => {
   }
   if (pathname === "/api/lint" && req.method === "POST") {
     let body = "";
-    req.on("data", chunk => body += chunk);
+    let rawTooLarge = false;
+    req.on("data", chunk => { body += chunk; if (body.length > 60000) rawTooLarge = true; });
     req.on("end", async () => {
       try {
+        if (rawTooLarge) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
         const { code, language } = JSON.parse(body || "{}");
         if (code === undefined || !language) return sendJson(res, { error: "Missing fields: code, language" }, 400);
         if (!["javascript", "python", "cpp"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
-        const { lint } = require("./server/utils/lint");
-        const diagnostics = await lint(code, language, ROOT);
-        return sendJson(res, { diagnostics }, 200);
+        lintStats.total++;
+        // Result cache (TTL 60s, cap 200): check BEFORE rate-limit and single-flight gates
+        // so repeats are fast and do not consume rate budget or g++ slots.
+        const key = lintCacheKey(code, language);
+        const cached = lintCacheGet(key);
+        if (cached) {
+          lintStats.cacheHits++;
+          return sendJson(res, { diagnostics: cached }, 200);
+        }
+        // Per-IP rate limit: min 1200ms between ACCEPTED requests
+        const ip = (req.socket && req.socket.remoteAddress) || "unknown";
+        const now = Date.now();
+        const last = lintRate.get(ip) || 0;
+        if (now - last < LINT_MIN_GAP_MS) {
+          lintStats.rateLimited++;
+          return sendJson(res, { diagnostics: [] }, 429);
+        }
+        // Single-flight for C++ g++ lint: max 1 concurrent g++ process.
+        // JS/python stay unlimited (cheap, in-process/py_compile).
+        const isCpp = language === "cpp";
+        if (isCpp && lintInflightCpp >= 1) {
+          return sendJson(res, { diagnostics: [] }, 429);
+        }
+        // Accepted: record timestamp, occupy g++ slot for cpp
+        lintRate.set(ip, now);
+        if (isCpp) lintInflightCpp++;
+        try {
+          const { lint } = require("./server/utils/lint");
+          const diagnostics = await lint(code, language, ROOT);
+          lintCacheSet(key, diagnostics);
+          return sendJson(res, { diagnostics }, 200);
+        } finally {
+          if (isCpp) lintInflightCpp = Math.max(0, lintInflightCpp - 1);
+        }
       } catch (e) {
         return sendJson(res, { error: e.message }, 500);
       }
@@ -1351,4 +1423,14 @@ server.listen(PORT, async () => {
     _c.on("error",()=>{ const _c2=_sp("g++",["--version"]); _c2.on("close",()=>console.log("g++ warmed (PATH)")); });
   }catch{}
   try{ const { getCompilePool } = require("./server/utils/compilePool"); getCompilePool(); }catch(e){ console.warn("compile pool warmup skipped", e.message); }
+  // Precompiled bits header for lint (non-blocking, failures swallowed).
+  // Generates <os.tmpdir()>/dsa_pch/bits/stdc++.h.gch once so per-keystroke
+  // g++ -fsyntax-only parses far less and uses far less RAM.
+  try {
+    const { ensureBitsPch } = require("./server/utils/lint");
+    ensureBitsPch(ROOT).then(
+      (p) => { if (p) console.log("PCH ready:", p); },
+      () => {}
+    );
+  } catch {}
 });

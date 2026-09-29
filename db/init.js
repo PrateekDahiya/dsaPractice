@@ -94,7 +94,10 @@ async function initDb() {
   try { await pool.query(`ALTER TABLE submissions ADD UNIQUE KEY uniq_user_q_lang (userId, questionId, language)`); } catch {}
   try { await pool.query(`ALTER TABLE submissions ADD CONSTRAINT fk_submissions_user FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE`); } catch {}
   try { await pool.query(`ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL`); } catch {}
-  try { await pool.query(`ALTER TABLE code_saves DROP INDEX uniq_q_lang`); } catch {}
+  try { await pool.query(`CREATE INDEX idx_q ON code_saves (questionId)`); } catch {}
+  try { await pool.query(`ALTER TABLE code_saves DROP INDEX uniq_q_lang`); } catch (e) {
+    if (!String(e.message || '').toLowerCase().includes('duplicate')) console.warn('uniq_q_lang drop skipped:', e.message);
+  }
   try { await pool.query(`ALTER TABLE submissions DROP INDEX uniq_user_q_lang`); } catch {}
 
   // indexes for dashboard speed (composite covering)

@@ -385,7 +385,7 @@
 
   function scheduleLint() {
     try { clearTimeout(lintTimer); } catch (e) {}
-    lintTimer = setTimeout(runLint, 400);
+    lintTimer = setTimeout(runLint, 1200); /* aligned with server 1200ms lint rate limit */
   }
 
   function runLint() {
@@ -535,6 +535,104 @@
     } catch (e) {}
     try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch (e2) {}
   }
+
+  /* ================= undo manager (own; native stack cleared by programmatic ta.value writes) ================= */
+  var undoStack = [];
+  var redoStack = [];
+  var UNDO_CAP = 100;
+  var COALESCE_MS = 1200;
+  var lastPushTime = 0;
+  var restoring = false;
+  var lastDocValue = null;
+  var lastDocSel = [0, 0];
+  function curSel() {
+    try { return [ta.selectionStart | 0, ta.selectionEnd | 0]; }
+    catch (e) { return [0, 0]; }
+  }
+  /* pushSnapshot(force, optState): push state unless value-identical to top.
+   * No optState -> pushes current {ta.value, selection} (used BEFORE a
+   * programmatic edit, so current == prior). With optState -> pushes the
+   * given {value, sel} (used for typing bursts where prior differs from
+   * current). force=true pushes immediately; otherwise coalesces: only
+   * auto-push when >COALESCE_MS since last push (track lastPushTime). */
+  function pushSnapshot(force, optState) {
+    var cur;
+    try {
+      if (optState && typeof optState.value === 'string') {
+        cur = { value: optState.value, sel: [optState.sel[0] | 0, optState.sel[1] | 0] };
+      } else {
+        cur = { value: ta.value, sel: curSel() };
+      }
+    } catch (e) { return; }
+    var top = undoStack.length ? undoStack[undoStack.length - 1] : null;
+    if (top && top.value === cur.value) return;
+    if (!force) {
+      var now = Date.now();
+      if (now - lastPushTime <= COALESCE_MS) return;
+    }
+    undoStack.push(cur);
+    if (undoStack.length > UNDO_CAP) undoStack.splice(0, undoStack.length - UNDO_CAP);
+    try { lastPushTime = Date.now(); } catch (e2) {}
+  }
+  function doUndo() {
+    if (!undoStack.length) return false;
+    var cur;
+    try { cur = { value: ta.value, sel: curSel() }; } catch (e) { return false; }
+    redoStack.push(cur);
+    if (redoStack.length > UNDO_CAP) redoStack.splice(0, redoStack.length - UNDO_CAP);
+    var prev = undoStack.pop();
+    restoring = true;
+    try {
+      ta.value = prev.value;
+      try { ta.selectionStart = prev.sel[0]; ta.selectionEnd = prev.sel[1]; } catch (e2) {}
+      hideSuggest();
+      hideHover();
+      scheduleRender();
+      scheduleLint();
+      notifyDocChange();
+      fireEditorInput();
+    } finally {
+      restoring = false;
+    }
+    try { lastDocValue = ta.value; } catch (e3) { lastDocValue = prev.value; }
+    try { lastDocSel = curSel(); } catch (e4) {}
+    lastPushTime = 0;
+    return true;
+  }
+  function doRedo() {
+    if (!redoStack.length) return false;
+    var cur;
+    try { cur = { value: ta.value, sel: curSel() }; } catch (e) { return false; }
+    undoStack.push(cur);
+    if (undoStack.length > UNDO_CAP) undoStack.splice(0, undoStack.length - UNDO_CAP);
+    var nxt = redoStack.pop();
+    restoring = true;
+    try {
+      ta.value = nxt.value;
+      try { ta.selectionStart = nxt.sel[0]; ta.selectionEnd = nxt.sel[1]; } catch (e2) {}
+      hideSuggest();
+      hideHover();
+      scheduleRender();
+      scheduleLint();
+      notifyDocChange();
+      fireEditorInput();
+    } finally {
+      restoring = false;
+    }
+    try { lastDocValue = ta.value; } catch (e3) { lastDocValue = nxt.value; }
+    try { lastDocSel = curSel(); } catch (e4) {}
+    lastPushTime = 0;
+    return true;
+  }
+  function resetUndo() {
+    undoStack.length = 0;
+    redoStack.length = 0;
+    lastPushTime = 0;
+    try { lastDocValue = ta.value; } catch (e) { lastDocValue = ''; }
+    try { lastDocSel = curSel(); } catch (e2) { lastDocSel = [0, 0]; }
+  }
+  try { lastDocValue = ta.value; } catch (e5) { lastDocValue = ''; }
+  try { lastDocSel = curSel(); } catch (e6) {}
 
   /* ================= 3. suggestions (DB-backed, no hardcoded lists) ================= */
   var methodListCache = {}; /* lang -> [{label, detail}] from /api/methods */
@@ -791,6 +889,9 @@
     if (!sugOpen || !sugItems.length) return false;
     var it = sugItems[Math.max(0, Math.min(sugIndex, sugItems.length - 1))];
     if (!it) return false;
+    pushSnapshot(true);
+    redoStack.length = 0;
+    restoring = true;
     try {
       var pos = ta.selectionStart;
       var start = (sugAnchor && typeof sugAnchor.start === 'number') ? sugAnchor.start : pos;
@@ -799,7 +900,7 @@
       ta.value = v.slice(0, start) + it.label + v.slice(end);
       var np = start + it.label.length;
       ta.selectionStart = ta.selectionEnd = np;
-    } catch (e) { return false; }
+    } catch (e) { restoring = false; return false; }
     suppressSuggestOnce = true;
     hideSuggest();
     hideHover();
@@ -807,6 +908,10 @@
     scheduleLint();
     notifyDocChange();
     fireEditorInput();
+    restoring = false;
+    try { lastDocValue = ta.value; } catch (e2) {}
+    try { lastDocSel = curSel(); } catch (e3) {}
+    lastPushTime = 0;
     return true;
   }
 
@@ -887,6 +992,26 @@
    * while window.__oeActive is set, so there is no double handling. */
   ta.addEventListener('keydown', function (e) {
     if (composing) return;
+    /* OWN undo/redo (native stack is cleared by programmatic ta.value writes).
+     * Runs in the existing textarea listener, before Tab/Enter handling.
+     * Window-capture suggest nav runs first; when the popup is open and the
+     * user hits Ctrl+Z we still undo here and hide the popup. */
+    try {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        var uk = e.key;
+        if (uk === 'z' || uk === 'Z' || uk === 'y' || uk === 'Y') {
+          var isUndo = ((uk === 'z' || uk === 'Z') && !e.shiftKey);
+          var isRedo = (((uk === 'z' || uk === 'Z') && e.shiftKey) || uk === 'y' || uk === 'Y');
+          if (isUndo || isRedo) {
+            e.preventDefault();
+            try { if (typeof e.stopPropagation === 'function') e.stopPropagation(); } catch (e0) {}
+            if (isUndo) doUndo();
+            else doRedo();
+            return;
+          }
+        }
+      }
+    } catch (eU) {}
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     /* auto-close pairs + skip-over closers (textarea target phase; the
      * window-capture suggest nav runs first and stops propagation while
@@ -896,7 +1021,9 @@
     /* skip-over: typing a closer that is already ahead just moves past it */
     if ((e.key === '}' || e.key === ')' || e.key === ']') && pv0.charAt(pe0) === e.key) {
       e.preventDefault();
+      pushSnapshot(true);
       ta.selectionStart = ta.selectionEnd = ps0 + 1;
+      try { lastDocSel = curSel(); } catch (eS) {}
       scheduleRender();
       scheduleLint();
       notifyDocChange();
@@ -912,7 +1039,9 @@
         if (prev && /[a-zA-Z0-9_]/.test(prev)) return; /* apostrophe in word: type normally */
         if (pv.charAt(pe) === e.key && ps === pe) {
           e.preventDefault();
+          pushSnapshot(true);
           ta.selectionStart = ta.selectionEnd = ps + 1;
+          try { lastDocSel = curSel(); } catch (eS2) {}
           scheduleRender();
           scheduleLint();
           notifyDocChange();
@@ -922,17 +1051,27 @@
       }
       if ((e.key === '{' || e.key === '(' || e.key === '[' || e.key === '"' || e.key === "'") && ps === pe) {
         e.preventDefault();
+        pushSnapshot(true);
+        redoStack.length = 0;
+        restoring = true;
         ta.value = pv.substring(0, ps) + e.key + pairs[e.key] + pv.substring(pe);
         ta.selectionStart = ta.selectionEnd = ps + 1;
         scheduleRender();
         scheduleLint();
         notifyDocChange();
         fireEditorInput();
+        restoring = false;
+        try { lastDocValue = ta.value; } catch (eL) {}
+        try { lastDocSel = curSel(); } catch (eL2) {}
+        lastPushTime = 0;
         refreshSuggest(e.key);
         return;
       }
       if ((e.key === '{' || e.key === '(' || e.key === '[') && ps !== pe) {
         e.preventDefault(); /* wrap selection */
+        pushSnapshot(true);
+        redoStack.length = 0;
+        restoring = true;
         ta.value = pv.substring(0, ps) + e.key + pv.substring(ps, pe) + pairs[e.key] + pv.substring(pe);
         ta.selectionStart = ps + 1;
         ta.selectionEnd = pe + 1;
@@ -940,12 +1079,19 @@
         scheduleLint();
         notifyDocChange();
         fireEditorInput();
+        restoring = false;
+        try { lastDocValue = ta.value; } catch (eL3) {}
+        try { lastDocSel = curSel(); } catch (eL4) {}
+        lastPushTime = 0;
         refreshSuggest(e.key);
         return;
       }
     }
     if (e.key === 'Tab') {
       e.preventDefault();
+      pushSnapshot(true);
+      redoStack.length = 0;
+      restoring = true;
       var start = ta.selectionStart, end = ta.selectionEnd;
       var v = ta.value;
       if (e.shiftKey) {
@@ -973,10 +1119,17 @@
       scheduleLint();
       notifyDocChange();
       fireEditorInput();
+      restoring = false;
+      try { lastDocValue = ta.value; } catch (eLT) {}
+      try { lastDocSel = curSel(); } catch (eLT2) {}
+      lastPushTime = 0;
       return;
     }
     if (e.key === 'Enter') {
       e.preventDefault();
+      pushSnapshot(true);
+      redoStack.length = 0;
+      restoring = true;
       var s = ta.selectionStart, en = ta.selectionEnd;
       var vv = ta.value;
       var bef = vv.substring(0, s);
@@ -1001,6 +1154,10 @@
       scheduleLint();
       notifyDocChange();
       fireEditorInput();
+      restoring = false;
+      try { lastDocValue = ta.value; } catch (eLE) {}
+      try { lastDocSel = curSel(); } catch (eLE2) {}
+      lastPushTime = 0;
     }
   });
 
@@ -1258,6 +1415,32 @@
 
   /* ================= editor events ================= */
   ta.addEventListener('input', function (e) {
+    if (restoring) {
+      try { lastDocValue = ta.value; } catch (eR) {}
+      try { lastDocSel = curSel(); } catch (eR2) {}
+      return;
+    }
+    /* OWN undo: typing after undo clears redo; coalesced prior push. */
+    try {
+      if (!composing && lastDocValue !== null && ta.value !== lastDocValue) {
+        var _d = e && e.data;
+        var _t = e && e.inputType;
+        var _isTyping = false;
+        if ((_d != null && _d !== '') ||
+            (_t && (_t.indexOf('insert') === 0 || _t.indexOf('delete') === 0))) {
+          _isTyping = true;
+        } else {
+          /* any user value change (paste/cut/drop, or plain Event) is a new branch */
+          _isTyping = true;
+        }
+        if (_isTyping) {
+          redoStack.length = 0;
+          try { pushSnapshot(false, { value: lastDocValue, sel: lastDocSel }); } catch (eP) {}
+        }
+      }
+    } catch (eU) {}
+    try { lastDocValue = ta.value; } catch (eL) {}
+    try { lastDocSel = curSel(); } catch (eL2) {}
     hideHover();
     scheduleRender();
     scheduleLint();
@@ -1315,14 +1498,21 @@
     setValue: function (v) {
       var s = String(v == null ? '' : v);
       if (ta.value === s) { scheduleRender(); return; }
+      pushSnapshot(true);
+      redoStack.length = 0;
       ta.value = s;
+      try { ta.selectionStart = ta.selectionEnd = 0; } catch (eS) {}
       diags = [];
       lintSnapshot = '';
       hideSuggest();
       hideHover();
       scheduleRender();
       scheduleLint();
+      try { lastDocValue = ta.value; } catch (eL) {}
+      try { lastDocSel = curSel(); } catch (eL2) {}
+      lastPushTime = 0;
     },
+    resetUndo: function () { resetUndo(); },
     setLanguage: function (lang) {
       var l = normLang(lang);
       if (l === state.lang) { scheduleRender(); return; }

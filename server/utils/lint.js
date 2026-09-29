@@ -17,6 +17,67 @@ function resolveCompiler(ROOT) {
   return 'g++';
 }
 
+function getPchPath() {
+  return path.join(os.tmpdir(), 'dsa_pch', 'bits', 'stdc++.h.gch');
+}
+
+function isPchAvailable() {
+  try { return fs.existsSync(getPchPath()); } catch { return false; }
+}
+
+// Generate bits precompiled header once (called non-blocking at server startup).
+// Output: <os.tmpdir()>/dsa_pch/bits/stdc++.h.gch via
+//   g++ -std=c++17 -x c++-header <bits/stdc++.h> -o <gch>
+// bits path resolved via `g++ -print-file-name=bits/stdc++.h` with fallback
+// to a temp header containing `#include <bits/stdc++.h>`. Failures swallowed (null).
+async function ensureBitsPch(ROOT) {
+  try {
+    const gchPath = getPchPath();
+    try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
+    const compiler = resolveCompiler(ROOT);
+    try { fs.mkdirSync(path.dirname(gchPath), { recursive: true }); } catch {}
+    // 1) resolve real bits header path
+    let bitsPath = null;
+    try {
+      const r = await runCmd(compiler, ['-print-file-name=bits/stdc++.h'], 8000);
+      const out = String((r && r.out) || '').trim().split('\n')[0].trim();
+      if (out) {
+        let candidate = out;
+        // some mingw builds print with CR; already trimmed
+        try {
+          if (path.isAbsolute(candidate) && fs.existsSync(candidate)) bitsPath = candidate;
+          else if (!path.isAbsolute(candidate)) bitsPath = null; // not found -> fallback
+          else bitsPath = null;
+        } catch { bitsPath = null; }
+      }
+    } catch { bitsPath = null; }
+    if (bitsPath) {
+      try {
+        const r2 = await runCmd(compiler, ['-std=c++17', '-x', 'c++-header', bitsPath, '-o', gchPath], 120000);
+        if (r2 && r2.code === 0) {
+          try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
+        }
+      } catch {}
+      // fall through to fallback header on failure
+    }
+    // 2) fallback: temp header with #include <bits/stdc++.h>
+    const tmpH = path.join(os.tmpdir(), `dsa_pch_fallback_${Date.now()}.h`);
+    try {
+      fs.writeFileSync(tmpH, '#include <bits/stdc++.h>\n', 'utf8');
+      const r3 = await runCmd(compiler, ['-std=c++17', '-x', 'c++-header', tmpH, '-o', gchPath], 120000);
+      if (r3 && r3.code === 0) {
+        try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
+      }
+    } catch {} finally {
+      try { fs.unlinkSync(tmpH); } catch {}
+    }
+    try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Lightweight static hints for wrong-method usage (no execution)
 function staticHints(code, language) {
   const out = [];
@@ -102,7 +163,20 @@ async function lintCpp(code, ROOT) {
   const userLines = code.split('\n');
   fs.writeFileSync(tmpFile, prefix + code, 'utf8');
   try {
-    const r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', tmpFile], 8000);
+    // Use precompiled bits header when available (faster, far less RAM).
+    // If the compile errors mention pch, retry once without the flag (identical to old behavior).
+    let r;
+    let pchAvailable = false;
+    try { pchAvailable = fs.existsSync(getPchPath()); } catch { pchAvailable = false; }
+    if (pchAvailable) {
+      r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', '-include-pch', getPchPath(), tmpFile], 8000);
+      const combined = String((r && r.err) || '') + '\n' + String((r && r.out) || '');
+      if (r.code !== 0 && /pch|precompiled|unrecognized.*include/i.test(combined)) {
+        r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', tmpFile], 8000);
+      }
+    } else {
+      r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', tmpFile], 8000);
+    }
     if (r.code !== 0 && r.err) {
       for (const rawLine of String(r.err).split('\n').slice(0, 30)) {
         const d = parseGccLine(rawLine.trim(), tmpFile);
@@ -167,4 +241,4 @@ async function lint(code, language, ROOT) {
   throw new Error('Unsupported language');
 }
 
-module.exports = { lint };
+module.exports = { lint, ensureBitsPch, getPchPath, isPchAvailable, resolveCompiler };
