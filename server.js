@@ -915,11 +915,12 @@ const server = http.createServer(async (req, res) => {
         if (!q.title) errs.push("title required");
         if (!["Easy","Medium","Hard"].includes(q.difficulty)) errs.push("difficulty must be Easy/Medium/Hard");
         if (!q.problemStatement) errs.push("problemStatement required");
+        if (!Array.isArray(q.examples) || q.examples.length===0) errs.push("examples must be a non-empty array");
         if (!q.functionName) errs.push("functionName required");
         if (!Array.isArray(q.params) || q.params.length===0) errs.push("params required");
         if (!q.starterCode || !q.starterCode.javascript) errs.push("starterCode.javascript required");
-        if (!Array.isArray(q.visibleTestCases) || q.visibleTestCases.length===0) errs.push("visibleTestCases required");
-        if (!Array.isArray(q.hiddenTestCases)) errs.push("hiddenTestCases must be array");
+        if (!Array.isArray(q.visibleTestCases) || q.visibleTestCases.length===0) errs.push("visibleTestCases must be a non-empty array");
+        if (!Array.isArray(q.hiddenTestCases) || q.hiddenTestCases.length===0) errs.push("hiddenTestCases must be a non-empty array");
         if (errs.length) return sendJson(res, { error: errs.join("; ") }, 400);
         const allCases = [...q.visibleTestCases, ...q.hiddenTestCases];
         for (const tc of allCases) {
