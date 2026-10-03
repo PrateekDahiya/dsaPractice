@@ -95,3 +95,12 @@ If uncertain, ask ONE clarification then output JSON.
 
 ## Quick Test (paste generated JSON to validate)
 In app: `+ Add Question` → `Raw JSON` → Paste → `Validate` → `Save to questions/` → appears in list. Or `POST /api/questions`.
+
+## Automated Generation (server-side, Groq)
+
+Manual contract above is for humans. The server's own generator (`server/utils/groq.js`, `POST /api/questions/generate`) uses a stricter split contract — the model MUST NOT emit `expectedOutput`:
+- Model returns: full draft + `testInputsVisible` (3x `{id,input}`) + `testInputsHidden` (5x `{id,input}`) + `referenceSolution` (JS string defining `functionName`, must RETURN the answer).
+- Server runs the reference through the `runJS` oracle (`server/utils/runner.js`) to compute every `expectedOutput`; any throw/truncation → 502, nothing saved. Saved rows get tag `ai-generated` (+ caller-supplied tags) and `generatedBy: "groq:<model>"` (file backup only).
+- Endpoint: auth required, `{topic, difficulty, model?, tags?}`, whitelist `openai/gpt-oss-120b` (default) / `openai/gpt-oss-20b`, per-user 30s rate limit + single-flight. Needs `GROQ_API_KEY` env (local `.env`, Render env var) or 503. Free-tier TPM is 8000 — prompt is slim and `max_tokens` capped at 3000 with one halved-budget retry on 413.
+- `GET /api/generate/models` → `{models, defaultModel, keyConfigured}` (public, no key leaked).
+- `roadmap.html`: 20 Striver A2Z steps, seed question ids + `roadmap:<slug>` tag matching, progress from `/api/questions/solved` + `/api/manual-solved`, per-step Generate button calling the endpoint with the step tag so new questions auto-slot.
