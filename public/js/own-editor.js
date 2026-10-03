@@ -915,15 +915,30 @@
     return true;
   }
 
+  /* Popup lives only while the caret stays inside its anchor word.
+   * Any caret move elsewhere (arrows, click, selection) closes it. */
+  function caretInAnchorWord() {
+    try {
+      if (!sugAnchor || typeof sugAnchor.start !== 'number') return false;
+      if (ta.selectionStart !== ta.selectionEnd) return false;
+      var pos = ta.selectionStart;
+      if (pos < sugAnchor.start) return false;
+      var v = ta.value, e = sugAnchor.start;
+      while (e < v.length && /[A-Za-z0-9_]/.test(v.charAt(e))) e++;
+      return pos <= e;
+    } catch (err) { return false; }
+  }
+  function checkCaret() {
+    if (!sugOpen) return;
+    if (!caretInAnchorWord()) hideSuggest();
+  }
   function refreshSuggest(triggerCh) {
     if (composing || !suggestEl) return;
     var r = wordRangeBeforeCaret();
     if (!r) { hideSuggest(); return; }
-    if (!r.prefix && triggerCh !== '.' && triggerCh !== '(') {
-      if (!sugOpen) return; /* keep closed */
-      hideSuggest();
-      return;
-    }
+    /* '.' after a word/close shows the member list; everything else needs a
+     * real prefix — '(' , ')' , ';' , space etc. always hide. */
+    if (!r.prefix && triggerCh !== '.') { hideSuggest(); return; }
     var anchor = { start: r.start, end: r.end };
     var caretNow = null;
     try { caretNow = ta.selectionStart; } catch (e) {}
@@ -933,7 +948,22 @@
         if (ta.selectionStart !== caretNow || ta.selectionStart !== ta.selectionEnd) return;
       } catch (e) {}
       if (!items.length) { hideSuggest(); return; }
-      showSuggest(items, anchor);
+      /* re-validate anchor: word must still start here (typed meanwhile?) */
+      var r2 = null;
+      try {
+        var p2 = ta.selectionStart;
+        if (ta.selectionStart === ta.selectionEnd) {
+          var left = ta.value.slice(0, p2);
+          var m2 = left.match(/[A-Za-z_]\w*$/);
+          if (m2 && p2 - m2[0].length === anchor.start) {
+            r2 = { start: anchor.start, end: p2 };
+          } else if (!left.match(/[A-Za-z_]\w*$/) && triggerCh === '.') {
+            r2 = { start: anchor.start, end: anchor.end };
+          }
+        }
+      } catch (e2) {}
+      if (!r2) { hideSuggest(); return; }
+      showSuggest(items, r2);
     });
   }
 
@@ -970,10 +1000,10 @@
         sugIndex = (sugIndex - 1 + sugItems.length) % Math.max(1, sugItems.length);
         paintSugSel();
       } else if (k === 'Enter') {
-        /* accept ONLY when popup open with a selection; else let newline happen */
-        if (sugOpen && sugItems.length) {
-          e.preventDefault(); e.stopPropagation();
-          acceptSuggest();
+        /* Enter never accepts — it inserts a newline. Just close the popup
+         * and let the event through to the textarea handler. */
+        if (sugOpen) {
+          hideSuggest();
         }
       } else if (k === 'Tab') {
         e.preventDefault(); e.stopPropagation();
@@ -1454,12 +1484,10 @@
         if (sugOpen) refreshSuggest('');
         return;
       }
-      if (ch && (ch === '.' || ch === '(' || /[\w]/.test(ch))) {
-        /* NOTE: '(' is never blocked — the char inserts normally; we only show the popup */
+      if (ch && (ch === '.' || /[\w]/.test(ch))) {
         refreshSuggest(ch);
-      } else if (sugOpen && (!ch || ch === '')) {
-        refreshSuggest('');
-      } else if (!ch) {
+      } else {
+        /* any other edit (space, parens, semicolon, newline...) kills it */
         hideSuggest();
       }
     } catch (err) {}
@@ -1480,6 +1508,20 @@
   });
   ta.addEventListener('blur', function () {
     setTimeout(hideSuggest, 150);
+  });
+  /* caret moved without editing (arrows, home/end, pgup/pgdn, click):
+   * keep the popup only while the caret stays inside its anchor word */
+  ta.addEventListener('keyup', function (e) {
+    try {
+      var k = e && e.key;
+      if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' ||
+          k === 'Home' || k === 'End' || k === 'PageUp' || k === 'PageDown') {
+        checkCaret();
+      }
+    } catch (err) {}
+  });
+  ta.addEventListener('click', function () {
+    try { checkCaret(); } catch (e) {}
   });
   try {
     ta.addEventListener('mouseleave', hideHover);
