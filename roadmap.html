@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roadmap — DSA Practice</title>
+  <link rel="icon" type="image/png" href="public/logo.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text);display:flex;align-items:center;gap:8px"><img src="public/logo.png" alt="Logo" style="height:32px;width:auto;border-radius:6px;object-fit:contain"> DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="problems.html" class="ghost-link">Browse</a>
+        <a href="roadmap.html" class="ghost-link" style="border-color:var(--accent);color:var(--text)">Roadmap</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="index.html" class="ghost-link">Problems</a>
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="lb-wrap" style="max-width:1100px">
+    <h1 style="font-size:22px;margin-bottom:6px">Striver A2Z Roadmap</h1>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:6px">20 steps, basics to advanced — your questions slotted in, gaps fillable with AI.</p>
+    <div id="overall" style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px">Loading...</div>
+    <div id="ai-note" class="hidden" style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--muted)"></div>
+    <div id="steps"></div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),3500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    function clearAuth(){ localStorage.removeItem("token"); localStorage.removeItem("user"); }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    function updateTopbar(){
+      const user=getUser();
+      const a=$("#auth-area");
+      if(!a) return;
+      if(user && getToken()){
+        a.innerHTML=`<a href="dashboard.html" style="font-weight:600;font-size:13px;color:var(--text);text-decoration:none">${esc(user.username)}</a><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
+        document.getElementById("logout-btn")?.addEventListener("click",()=>{ clearAuth(); location.reload(); });
+      } else {
+        a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
+      }
+    }
+
+    const STEPS=[
+      {slug:"basics",title:"Basics & Maths",blurb:"Language basics, time complexity, number drills.",seedIds:["find-missing-number","single-number"],genTopic:"programming basics and maths drills like count digits, palindrome number, GCD and LCM",genDifficulty:"Easy"},
+      {slug:"sorting",title:"Sorting",blurb:"Implement the sorts yourself before using built-ins.",seedIds:["union-of-two-sorted-arrays"],genTopic:"sorting algorithms you implement yourself: bubble sort, insertion sort, merge sort",genDifficulty:"Easy"},
+      {slug:"arrays",title:"Arrays",blurb:"The workhorse topic — traversal, two pointers, prefix sums.",seedIds:["two-sum","move-zeroes","remove-duplicates-sorted-array","maximum-subarray","majority-element","best-time-to-buy-and-sell-stock","rearrange-array-by-sign","count-subarrays-with-sum-k","maximum-consecutive-ones","move-negative-numbers","rotate-array","leaders-in-array","longest-subarray-given-sum","subarray-sum-equals-k","product-of-array-except-self","longest-consecutive-sequence","maximum-product-subarray","three-sum","container-with-most-water","intersection-of-two-arrays","linear-search-unsorted-array"],genTopic:"hard array patterns: merge intervals, next permutation, majority element II",genDifficulty:"Medium"},
+      {slug:"hashing",title:"Hashing",blurb:"Trade space for time with maps and sets.",seedIds:["two-sum","majority-element","count-subarrays-with-sum-k","subarray-sum-equals-k","longest-consecutive-sequence","longest-subarray-given-sum","intersection-of-two-arrays"],genTopic:"hashing patterns: group anagrams, longest substring without repeating characters",genDifficulty:"Easy"},
+      {slug:"binary-search",title:"Binary Search",blurb:"Sorted data means logarithmic answers.",seedIds:["find-target-index-in-sorted-array"],genTopic:"binary search variants: first and last occurrence, search in rotated sorted array",genDifficulty:"Easy"},
+      {slug:"strings-basic",title:"Strings (Basic)",blurb:"The everyday string toolkit.",seedIds:["reverse-string","valid-parentheses"],genTopic:"string basics: valid anagram, longest common prefix, reverse words in a string",genDifficulty:"Easy"},
+      {slug:"recursion",title:"Recursion",blurb:"Think in base case + smaller problem.",seedIds:[],genTopic:"recursion fundamentals: pow(x,n), subsets, combination sum",genDifficulty:"Easy"},
+      {slug:"linked-list",title:"Linked List",blurb:"Pointer juggling, simulated with arrays here.",seedIds:[],genTopic:"linked list basics using array representation: reverse, find middle, detect cycle",genDifficulty:"Easy"},
+      {slug:"bit-manipulation",title:"Bit Manipulation",blurb:"XOR tricks and bit surgery.",seedIds:["single-number","find-missing-number"],genTopic:"bit manipulation: count set bits, power of two, single number II",genDifficulty:"Easy"},
+      {slug:"greedy",title:"Greedy",blurb:"Locally optimal choices that stay globally optimal.",seedIds:["best-time-to-buy-and-sell-stock","container-with-most-water"],genTopic:"greedy: jump game, gas station, assign cookies",genDifficulty:"Easy"},
+      {slug:"sliding-window",title:"Sliding Window / Two Pointers",blurb:"Linear scans over contiguous ranges.",seedIds:["container-with-most-water"],genTopic:"sliding window and two pointers: longest substring without repeat, minimum window substring",genDifficulty:"Medium"},
+      {slug:"stack-queue",title:"Stack / Queue",blurb:"LIFO and FIFO problem patterns.",seedIds:["valid-parentheses"],genTopic:"stack and queue: min stack, next greater element, daily temperatures",genDifficulty:"Easy"},
+      {slug:"binary-trees",title:"Binary Trees",blurb:"Traversals and tree recursion, array-represented.",seedIds:[],genTopic:"binary trees using array representation: max depth, inorder traversal, level order",genDifficulty:"Medium"},
+      {slug:"bst",title:"Binary Search Trees",blurb:"Ordered trees, ordered answers.",seedIds:[],genTopic:"binary search trees using array representation: validate BST, kth smallest element",genDifficulty:"Medium"},
+      {slug:"heaps",title:"Heaps",blurb:"Top-K and streaming order statistics.",seedIds:[],genTopic:"heaps and priority queues: kth largest element, top k frequent elements",genDifficulty:"Medium"},
+      {slug:"graphs",title:"Graphs",blurb:"BFS/DFS over adjacency lists.",seedIds:[],genTopic:"graphs with adjacency lists: number of islands, BFS shortest path, course schedule",genDifficulty:"Medium"},
+      {slug:"dp",title:"Dynamic Programming",blurb:"Overlapping subproblems, memoized or tabulated.",seedIds:["maximum-subarray","maximum-product-subarray"],genTopic:"dynamic programming: climbing stairs, house robber, longest increasing subsequence",genDifficulty:"Medium"},
+      {slug:"trie",title:"Trie",blurb:"Prefix trees for string sets.",seedIds:[],genTopic:"trie prefix tree: implement insert and search, longest common prefix",genDifficulty:"Medium"},
+      {slug:"strings-advanced",title:"Strings (Advanced)",blurb:"Pattern matching algorithms.",seedIds:[],genTopic:"advanced string matching: implement strStr, repeated substring pattern",genDifficulty:"Medium"},
+      {slug:"maths",title:"Maths",blurb:"Number theory for interviews.",seedIds:["find-missing-number"],genTopic:"interview maths: count primes with sieve of eratosthenes, pow(x,n), excel column number",genDifficulty:"Easy"},
+    ];
+
+    let questions=[], solvedSet=new Set(), attemptedSet=new Set(), aiReady=false;
+
+    function stepQuestions(step){
+      const tag="roadmap:"+step.slug;
+      const seen=new Set();
+      return questions.filter(q=>{
+        if(seen.has(q.id)) return false;
+        const hit=(q.tags||[]).includes(tag)||step.seedIds.includes(q.id);
+        if(hit) seen.add(q.id);
+        return hit;
+      });
+    }
+
+    async function loadAll(){
+      const [qs, models] = await Promise.all([
+        fetch("/api/questions").then(r=>{ if(!r.ok) throw new Error("questions failed"); return r.json(); }),
+        fetch("/api/generate/models").then(r=>r.ok?r.json():null).catch(()=>null),
+      ]);
+      questions = qs;
+      aiReady = !!(models && models.keyConfigured);
+      if(!aiReady){
+        const n=$("#ai-note");
+        n.classList.remove("hidden");
+        n.textContent="AI generation is not configured on this server (GROQ_API_KEY missing) — Generate buttons are disabled.";
+      }
+      if(getToken()){
+        try{
+          const r1=await fetch("/api/questions/solved",{headers:authHeaders({})});
+          if(r1.ok){ (await r1.json()).forEach(id=>solvedSet.add(id)); }
+          const r2=await fetch("/api/manual-solved",{headers:authHeaders({})});
+          if(r2.ok){ (await r2.json()).forEach(id=>solvedSet.add(id)); }
+          const r3=await fetch("/api/submissions?limit=100",{headers:authHeaders({})});
+          if(r3.ok){ (await r3.json()).forEach(s=>{ if(!solvedSet.has(s.questionId)) attemptedSet.add(s.questionId); }); }
+        }catch{}
+      }
+    }
+
+    function chip(q){
+      const mark=solvedSet.has(q.id)?'<span style="color:#00b8a3;font-weight:700">✓</span>':(attemptedSet.has(q.id)?'<span style="color:#ffa116;font-weight:700">●</span>':'<span style="color:var(--muted)">·</span>');
+      const ai=(q.tags||[]).includes("ai-generated")?' <span style="font-size:10px;color:var(--muted)">AI</span>':"";
+      return `<a href="index.html#${esc(q.id)}" style="display:inline-flex;align-items:center;gap:5px;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;margin:0 6px 6px 0">${mark}${esc(q.title)}${ai}</a>`;
+    }
+
+    function render(){
+      const allIds=new Set();
+      STEPS.forEach(s=>stepQuestions(s).forEach(q=>allIds.add(q.id)));
+      const solved=[...allIds].filter(id=>solvedSet.has(id)).length;
+      $("#overall").innerHTML=`<strong>${solved} / ${allIds.size}</strong> roadmap questions solved${getToken()?"":" — <a href='login.html' class='ghost-link'>login</a> to track progress"}`;
+      $("#steps").innerHTML=STEPS.map((s,i)=>{
+        const qs=stepQuestions(s);
+        const done=qs.filter(q=>solvedSet.has(q.id)).length;
+        const pct=qs.length?Math.round(done/qs.length*100):0;
+        const list=qs.length?qs.map(chip).join(""):'<span style="color:var(--muted);font-size:12px">Gap — nothing here yet. Generate one below.</span>';
+        return `<div style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+          <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+            <span style="color:var(--muted);font-size:12px">Step ${i+1}</span>
+            <strong style="font-size:15px">${esc(s.title)}</strong>
+            <span style="color:var(--muted);font-size:12px;margin-left:auto">${done}/${qs.length} solved</span>
+          </div>
+          <div style="color:var(--muted);font-size:12px;margin:4px 0 8px">${esc(s.blurb)}</div>
+          <div class="diff-bar" style="margin-bottom:10px"><span style="width:${pct}%"></span></div>
+          <div>${list}</div>
+          <div style="margin-top:8px">
+            <button class="btn ghost gen-btn" data-step="${esc(s.slug)}" style="padding:6px 12px;font-size:12px" ${aiReady?"":"disabled title='AI not configured'"}>✨ Generate ${esc(s.genDifficulty)} question</button>
+          </div>
+        </div>`;
+      }).join("");
+      document.querySelectorAll(".gen-btn").forEach(b=>b.addEventListener("click",()=>generateFor(b.dataset.step,b)));
+    }
+
+    async function generateFor(slug, btn){
+      const step=STEPS.find(s=>s.slug===slug);
+      if(!step) return;
+      if(!getToken()){ toast("Login first to generate questions."); location.href="login.html"; return; }
+      btn.disabled=true;
+      const orig=btn.textContent;
+      btn.textContent="Generating… (up to ~1 min)";
+      try{
+        const r=await fetch("/api/questions/generate",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({topic:step.genTopic,difficulty:step.genDifficulty,tags:["roadmap:"+step.slug]})});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(d.error||("generate failed ("+r.status+")"));
+        toast(`Added: ${d.title}`);
+        const qs=await fetch("/api/questions").then(x=>x.json());
+        questions=qs;
+        render();
+      }catch(e){
+        toast("Generate failed: "+e.message);
+        btn.disabled=false;
+      }finally{
+        if(btn.isConnected && btn.disabled && btn.textContent.startsWith("Generating")){ btn.textContent=orig; }
+      }
+    }
+
+    (async()=>{
+      updateTopbar();
+      const t=getToken();
+      if(t){
+        try{ const r=await fetch("/api/me",{headers:{Authorization:"Bearer "+t}}); if(!r.ok) clearAuth(); else { const u=await r.json(); localStorage.setItem("user",JSON.stringify(u)); updateTopbar(); } }catch{}
+      }
+      try{ await loadAll(); render(); }
+      catch(e){ $("#overall").textContent="Error: "+e.message; }
+    })();
+  </script>
+</body>
+</html>

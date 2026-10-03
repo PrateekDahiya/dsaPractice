@@ -1,0 +1,179 @@
+{
+  "id": "merge-sort-array",
+  "title": "Merge Sort an Array",
+  "difficulty": "Easy",
+  "tags": [
+    "ai-generated",
+    "roadmap:sorting"
+  ],
+  "problemStatement": "Given an integer array <code>nums</code>, return a new array containing the same elements in non‑decreasing order. You must implement the sorting using the merge sort algorithm yourself; using built‑in sorting functions is not allowed.",
+  "constraints": [
+    "1 <= nums.length <= 10^4",
+    "-10^5 <= nums[i] <= 10^5"
+  ],
+  "examples": [
+    {
+      "input": "nums = [5,2,4,6,1,3]",
+      "output": "[1,2,3,4,5,6]",
+      "explanation": "After applying merge sort, the array is sorted in ascending order."
+    },
+    {
+      "input": "nums = [0]",
+      "output": "[0]",
+      "explanation": "A single‑element array is already sorted."
+    }
+  ],
+  "functionName": "mergeSortArray",
+  "pythonFunctionName": "merge_sort_array",
+  "params": [
+    "nums"
+  ],
+  "starterCode": {
+    "javascript": "function mergeSortArray(nums) {\n    // TODO: implement merge sort\n}",
+    "python": "def merge_sort_array(nums):\n    # TODO: implement merge sort\n    pass"
+  },
+  "visibleTestCases": [
+    {
+      "id": "vis-1",
+      "input": {
+        "nums": [
+          3,
+          1,
+          2
+        ]
+      },
+      "expectedOutput": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "id": "vis-2",
+      "input": {
+        "nums": [
+          10,
+          -1,
+          2,
+          5,
+          0
+        ]
+      },
+      "expectedOutput": [
+        -1,
+        0,
+        2,
+        5,
+        10
+      ]
+    },
+    {
+      "id": "vis-3",
+      "input": {
+        "nums": [
+          7,
+          7,
+          7
+        ]
+      },
+      "expectedOutput": [
+        7,
+        7,
+        7
+      ]
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "hid-1",
+      "input": {
+        "nums": []
+      },
+      "expectedOutput": []
+    },
+    {
+      "id": "hid-2",
+      "input": {
+        "nums": [
+          42
+        ]
+      },
+      "expectedOutput": [
+        42
+      ]
+    },
+    {
+      "id": "hid-3",
+      "input": {
+        "nums": [
+          5,
+          5,
+          5,
+          5,
+          5
+        ]
+      },
+      "expectedOutput": [
+        5,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    {
+      "id": "hid-4",
+      "input": {
+        "nums": [
+          100000,
+          -100000,
+          0,
+          99999,
+          -99999
+        ]
+      },
+      "expectedOutput": [
+        -100000,
+        -99999,
+        0,
+        99999,
+        100000
+      ]
+    },
+    {
+      "id": "hid-5",
+      "input": {
+        "nums": [
+          9,
+          8,
+          7,
+          6,
+          5,
+          4,
+          3,
+          2,
+          1,
+          0
+        ]
+      },
+      "expectedOutput": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    }
+  ],
+  "referenceSolution": "function mergeSortArray(nums) {\n    if (nums.length <= 1) return nums.slice();\n    const merge = (left, right) => {\n        const merged = [];\n        let i = 0, j = 0;\n        while (i < left.length && j < right.length) {\n            if (left[i] <= right[j]) {\n                merged.push(left[i++]);\n            } else {\n                merged.push(right[j++]);\n            }\n        }\n        while (i < left.length) merged.push(left[i++]);\n        while (j < right.length) merged.push(right[j++]);\n        return merged;\n    };\n    const sort = (arr) => {\n        if (arr.length <= 1) return arr;\n        const mid = Math.floor(arr.length / 2);\n        const left = sort(arr.slice(0, mid));\n        const right = sort(arr.slice(mid));\n        return merge(left, right);\n    };\n    return sort(nums);\n}",
+  "generatedBy": "groq:openai/gpt-oss-120b",
+  "createdAt": "2026-10-03T19:58:25.112Z",
+  "updatedAt": "2026-10-03T19:58:25.112Z",
+  "addedBy": 9,
+  "addedByUsername": "dahiyaprtk"
+}
