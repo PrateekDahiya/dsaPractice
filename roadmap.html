@@ -56,39 +56,48 @@
     }
 
     const STEPS=[
-      {slug:"basics",title:"Basics & Maths",blurb:"Language basics, time complexity, number drills.",seedIds:["find-missing-number","single-number"],genTopic:"programming basics and maths drills like count digits, palindrome number, GCD and LCM",genDifficulty:"Easy"},
-      {slug:"sorting",title:"Sorting",blurb:"Implement the sorts yourself before using built-ins.",seedIds:["union-of-two-sorted-arrays"],genTopic:"sorting algorithms you implement yourself: bubble sort, insertion sort, merge sort",genDifficulty:"Easy"},
-      {slug:"arrays",title:"Arrays",blurb:"The workhorse topic — traversal, two pointers, prefix sums.",seedIds:["two-sum","move-zeroes","remove-duplicates-sorted-array","maximum-subarray","majority-element","best-time-to-buy-and-sell-stock","rearrange-array-by-sign","count-subarrays-with-sum-k","maximum-consecutive-ones","move-negative-numbers","rotate-array","leaders-in-array","longest-subarray-given-sum","subarray-sum-equals-k","product-of-array-except-self","longest-consecutive-sequence","maximum-product-subarray","three-sum","container-with-most-water","intersection-of-two-arrays","linear-search-unsorted-array"],genTopic:"hard array patterns: merge intervals, next permutation, majority element II",genDifficulty:"Medium"},
-      {slug:"hashing",title:"Hashing",blurb:"Trade space for time with maps and sets.",seedIds:["two-sum","majority-element","count-subarrays-with-sum-k","subarray-sum-equals-k","longest-consecutive-sequence","longest-subarray-given-sum","intersection-of-two-arrays"],genTopic:"hashing patterns: group anagrams, longest substring without repeating characters",genDifficulty:"Easy"},
-      {slug:"binary-search",title:"Binary Search",blurb:"Sorted data means logarithmic answers.",seedIds:["find-target-index-in-sorted-array"],genTopic:"binary search variants: first and last occurrence, search in rotated sorted array",genDifficulty:"Easy"},
-      {slug:"strings-basic",title:"Strings (Basic)",blurb:"The everyday string toolkit.",seedIds:["reverse-string","valid-parentheses"],genTopic:"string basics: valid anagram, longest common prefix, reverse words in a string",genDifficulty:"Easy"},
-      {slug:"recursion",title:"Recursion",blurb:"Think in base case + smaller problem.",seedIds:[],genTopic:"recursion fundamentals: pow(x,n), subsets, combination sum",genDifficulty:"Easy"},
-      {slug:"linked-list",title:"Linked List",blurb:"Pointer juggling, simulated with arrays here.",seedIds:[],genTopic:"linked list basics using array representation: reverse, find middle, detect cycle",genDifficulty:"Easy"},
-      {slug:"bit-manipulation",title:"Bit Manipulation",blurb:"XOR tricks and bit surgery.",seedIds:["single-number","find-missing-number"],genTopic:"bit manipulation: count set bits, power of two, single number II",genDifficulty:"Easy"},
-      {slug:"greedy",title:"Greedy",blurb:"Locally optimal choices that stay globally optimal.",seedIds:["best-time-to-buy-and-sell-stock","container-with-most-water"],genTopic:"greedy: jump game, gas station, assign cookies",genDifficulty:"Easy"},
-      {slug:"sliding-window",title:"Sliding Window / Two Pointers",blurb:"Linear scans over contiguous ranges.",seedIds:["container-with-most-water"],genTopic:"sliding window and two pointers: longest substring without repeat, minimum window substring",genDifficulty:"Medium"},
-      {slug:"stack-queue",title:"Stack / Queue",blurb:"LIFO and FIFO problem patterns.",seedIds:["valid-parentheses"],genTopic:"stack and queue: min stack, next greater element, daily temperatures",genDifficulty:"Easy"},
-      {slug:"binary-trees",title:"Binary Trees",blurb:"Traversals and tree recursion, array-represented.",seedIds:[],genTopic:"binary trees using array representation: max depth, inorder traversal, level order",genDifficulty:"Medium"},
-      {slug:"bst",title:"Binary Search Trees",blurb:"Ordered trees, ordered answers.",seedIds:[],genTopic:"binary search trees using array representation: validate BST, kth smallest element",genDifficulty:"Medium"},
-      {slug:"heaps",title:"Heaps",blurb:"Top-K and streaming order statistics.",seedIds:[],genTopic:"heaps and priority queues: kth largest element, top k frequent elements",genDifficulty:"Medium"},
-      {slug:"graphs",title:"Graphs",blurb:"BFS/DFS over adjacency lists.",seedIds:[],genTopic:"graphs with adjacency lists: number of islands, BFS shortest path, course schedule",genDifficulty:"Medium"},
-      {slug:"dp",title:"Dynamic Programming",blurb:"Overlapping subproblems, memoized or tabulated.",seedIds:["maximum-subarray","maximum-product-subarray"],genTopic:"dynamic programming: climbing stairs, house robber, longest increasing subsequence",genDifficulty:"Medium"},
-      {slug:"trie",title:"Trie",blurb:"Prefix trees for string sets.",seedIds:[],genTopic:"trie prefix tree: implement insert and search, longest common prefix",genDifficulty:"Medium"},
-      {slug:"strings-advanced",title:"Strings (Advanced)",blurb:"Pattern matching algorithms.",seedIds:[],genTopic:"advanced string matching: implement strStr, repeated substring pattern",genDifficulty:"Medium"},
-      {slug:"maths",title:"Maths",blurb:"Number theory for interviews.",seedIds:["find-missing-number"],genTopic:"interview maths: count primes with sieve of eratosthenes, pow(x,n), excel column number",genDifficulty:"Easy"},
+      {slug:"basics",title:"Basics & Maths",blurb:"Language basics, time complexity, number drills.",seedIds:["find-missing-number","single-number"],genDifficulty:"Easy",planned:["Count Digits","Reverse a Number","Palindrome Number","GCD and LCM","Armstrong Number","Print All Divisors"]},
+      {slug:"sorting",title:"Sorting",blurb:"Implement the sorts yourself before using built-ins.",seedIds:["union-of-two-sorted-arrays"],genDifficulty:"Easy",planned:["Selection Sort","Bubble Sort","Insertion Sort","Merge Sort","Quick Sort"]},
+      {slug:"arrays",title:"Arrays",blurb:"The workhorse topic — traversal, two pointers, prefix sums.",seedIds:["two-sum","move-zeroes","remove-duplicates-sorted-array","maximum-subarray","majority-element","best-time-to-buy-and-sell-stock","rearrange-array-by-sign","count-subarrays-with-sum-k","maximum-consecutive-ones","move-negative-numbers","rotate-array","leaders-in-array","longest-subarray-given-sum","subarray-sum-equals-k","product-of-array-except-self","longest-consecutive-sequence","maximum-product-subarray","three-sum","container-with-most-water","intersection-of-two-arrays","linear-search-unsorted-array"],genDifficulty:"Medium",planned:["Second Largest Element","Check if Array is Sorted","Left Rotate by One","Missing Number","Merge Intervals","Next Permutation"]},
+      {slug:"hashing",title:"Hashing",blurb:"Trade space for time with maps and sets.",seedIds:["two-sum","majority-element","count-subarrays-with-sum-k","subarray-sum-equals-k","longest-consecutive-sequence","longest-subarray-given-sum","intersection-of-two-arrays"],genDifficulty:"Easy",planned:["Two Sum","Group Anagrams","Longest Consecutive Sequence","Subarray Sum Equals K"]},
+      {slug:"binary-search",title:"Binary Search",blurb:"Sorted data means logarithmic answers.",seedIds:["find-target-index-in-sorted-array"],genDifficulty:"Easy",planned:["Binary Search","First and Last Occurrence","Search in Rotated Array","Find Minimum in Rotated Array","Single Element in Sorted Array"]},
+      {slug:"strings-basic",title:"Strings (Basic)",blurb:"The everyday string toolkit.",seedIds:["reverse-string","valid-parentheses"],genDifficulty:"Easy",planned:["Reverse String","Valid Anagram","Longest Common Prefix","Reverse Words","Valid Parentheses"]},
+      {slug:"recursion",title:"Recursion",blurb:"Think in base case + smaller problem.",seedIds:[],genDifficulty:"Easy",planned:["Pow(x,n)","Subsets","Combination Sum","Generate Parentheses","Permutations"]},
+      {slug:"linked-list",title:"Linked List",blurb:"Pointer juggling, simulated with arrays here.",seedIds:[],genDifficulty:"Easy",planned:["Reverse Linked List","Middle of Linked List","Detect Cycle","Merge Two Sorted Lists"]},
+      {slug:"bit-manipulation",title:"Bit Manipulation",blurb:"XOR tricks and bit surgery.",seedIds:["single-number","find-missing-number"],genDifficulty:"Easy",planned:["Single Number","Count Set Bits","Power of Two","Single Number II"]},
+      {slug:"greedy",title:"Greedy",blurb:"Locally optimal choices that stay globally optimal.",seedIds:["best-time-to-buy-and-sell-stock","container-with-most-water"],genDifficulty:"Easy",planned:["Assign Cookies","Jump Game","Gas Station","Best Time to Buy Stock"]},
+      {slug:"sliding-window",title:"Sliding Window / Two Pointers",blurb:"Linear scans over contiguous ranges.",seedIds:["container-with-most-water"],genDifficulty:"Medium",planned:["Longest Substring Without Repeat","Longest Repeating Char Replacement","Minimum Window Substring","Max Consecutive Ones III"]},
+      {slug:"stack-queue",title:"Stack / Queue",blurb:"LIFO and FIFO problem patterns.",seedIds:["valid-parentheses"],genDifficulty:"Easy",planned:["Valid Parentheses","Min Stack","Next Greater Element","Daily Temperatures","Implement Queue using Stacks"]},
+      {slug:"binary-trees",title:"Binary Trees",blurb:"Traversals and tree recursion, array-represented.",seedIds:[],genDifficulty:"Medium",planned:["Max Depth","Inorder Traversal","Level Order Traversal","Same Tree","Diameter of Binary Tree"]},
+      {slug:"bst",title:"Binary Search Trees",blurb:"Ordered trees, ordered answers.",seedIds:[],genDifficulty:"Medium",planned:["Search in BST","Validate BST","Kth Smallest Element","Lowest Common Ancestor"]},
+      {slug:"heaps",title:"Heaps",blurb:"Top-K and streaming order statistics.",seedIds:[],genDifficulty:"Medium",planned:["Kth Largest Element","Top K Frequent Elements","Last Stone Weight"]},
+      {slug:"graphs",title:"Graphs",blurb:"BFS/DFS over adjacency lists.",seedIds:[],genDifficulty:"Medium",planned:["Number of Islands","Course Schedule","Number of Provinces","Rotting Oranges"]},
+      {slug:"dp",title:"Dynamic Programming",blurb:"Overlapping subproblems, memoized or tabulated.",seedIds:["maximum-subarray","maximum-product-subarray"],genDifficulty:"Medium",planned:["Climbing Stairs","House Robber","Longest Increasing Subsequence","Coin Change","Maximum Subarray"]},
+      {slug:"trie",title:"Trie",blurb:"Prefix trees for string sets.",seedIds:[],genDifficulty:"Medium",planned:["Implement Trie","Longest Common Prefix","Design Add and Search Words"]},
+      {slug:"strings-advanced",title:"Strings (Advanced)",blurb:"Pattern matching algorithms.",seedIds:[],genDifficulty:"Medium",planned:["Implement strStr","Repeated Substring Pattern","Longest Palindromic Substring"]},
+      {slug:"maths",title:"Maths",blurb:"Number theory for interviews.",seedIds:["find-missing-number"],genDifficulty:"Easy",planned:["Count Primes","Pow(x,n)","Excel Column Number","Palindrome Number"]},
     ];
+
+    function norm(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+    function nameMatches(q, name){
+      const n=norm(name), t=norm(q.title);
+      if(!n || !t) return false;
+      return n===t || (n.length>=6 && (t.includes(n) || n.includes(t)));
+    }
 
     let questions=[], solvedSet=new Set(), attemptedSet=new Set(), aiReady=false;
 
     function stepQuestions(step){
       const tag="roadmap:"+step.slug;
       const seen=new Set();
-      return questions.filter(q=>{
+      const matched=questions.filter(q=>{
         if(seen.has(q.id)) return false;
-        const hit=(q.tags||[]).includes(tag)||step.seedIds.includes(q.id);
+        const hit=(q.tags||[]).includes(tag)||step.seedIds.includes(q.id)||(step.planned||[]).some(n=>nameMatches(q,n));
         if(hit) seen.add(q.id);
         return hit;
       });
+      const missing=(step.planned||[]).filter(n=>!matched.some(q=>nameMatches(q,n)));
+      return {matched, missing};
     }
 
     async function loadAll(){
@@ -123,51 +132,54 @@
 
     function render(){
       const allIds=new Set();
-      STEPS.forEach(s=>stepQuestions(s).forEach(q=>allIds.add(q.id)));
+      const perStep=STEPS.map(s=>({step:s, ...stepQuestions(s)}));
+      perStep.forEach(({matched})=>matched.forEach(q=>allIds.add(q.id)));
       const solved=[...allIds].filter(id=>solvedSet.has(id)).length;
       $("#overall").innerHTML=`<strong>${solved} / ${allIds.size}</strong> roadmap questions solved${getToken()?"":" — <a href='login.html' class='ghost-link'>login</a> to track progress"}`;
-      $("#steps").innerHTML=STEPS.map((s,i)=>{
-        const qs=stepQuestions(s);
+      $("#steps").innerHTML=perStep.map(({step:s, matched:qs, missing},i)=>{
         const done=qs.filter(q=>solvedSet.has(q.id)).length;
         const pct=qs.length?Math.round(done/qs.length*100):0;
-        const list=qs.length?qs.map(chip).join(""):'<span style="color:var(--muted);font-size:12px">Gap — nothing here yet. Generate one below.</span>';
+        const list=qs.length?qs.map(chip).join(""):'<span style="color:var(--muted);font-size:12px">Nothing here yet.</span>';
+        const missingRows=missing.length?missing.map(n=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed var(--border);font-size:13px">
+            <span style="color:var(--muted)">○ ${esc(n)}</span>
+            <span style="font-size:11px;color:var(--muted)">missing</span>
+            <button class="btn ghost gen-one" data-topic="${esc(n)}" data-diff="${esc(s.genDifficulty)}" data-tag="roadmap:${esc(s.slug)}" style="padding:4px 10px;font-size:12px;margin-left:auto" ${aiReady?"":"disabled title='AI not configured'"}>✨ Generate</button>
+          </div>`).join(""):'<div style="font-size:12px;color:#00b8a3;padding:6px 0">All planned questions present ✓</div>';
         return `<div style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
             <span style="color:var(--muted);font-size:12px">Step ${i+1}</span>
             <strong style="font-size:15px">${esc(s.title)}</strong>
-            <span style="color:var(--muted);font-size:12px;margin-left:auto">${done}/${qs.length} solved</span>
+            <span style="color:var(--muted);font-size:12px;margin-left:auto">${done}/${qs.length} solved · ${missing.length} missing</span>
           </div>
           <div style="color:var(--muted);font-size:12px;margin:4px 0 8px">${esc(s.blurb)}</div>
           <div class="diff-bar" style="margin-bottom:10px"><span style="width:${pct}%"></span></div>
           <div>${list}</div>
-          <div style="margin-top:8px">
-            <button class="btn ghost gen-btn" data-step="${esc(s.slug)}" style="padding:6px 12px;font-size:12px" ${aiReady?"":"disabled title='AI not configured'"}>✨ Generate ${esc(s.genDifficulty)} question</button>
-          </div>
+          <div style="margin-top:8px">${missingRows}</div>
         </div>`;
       }).join("");
-      document.querySelectorAll(".gen-btn").forEach(b=>b.addEventListener("click",()=>generateFor(b.dataset.step,b)));
+      document.querySelectorAll(".gen-one").forEach(b=>b.addEventListener("click",()=>generateOne(b)));
     }
 
-    async function generateFor(slug, btn){
-      const step=STEPS.find(s=>s.slug===slug);
-      if(!step) return;
+    async function generateOne(btn){
+      const topic=btn.dataset.topic, difficulty=btn.dataset.diff||"Easy", tag=btn.dataset.tag;
       if(!getToken()){ toast("Login first to generate questions."); location.href="login.html"; return; }
       btn.disabled=true;
       const orig=btn.textContent;
-      btn.textContent="Generating… (up to ~1 min)";
+      btn.textContent="Generating… (up to ~2 min)";
       try{
-        const r=await fetch("/api/questions/generate",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({topic:step.genTopic,difficulty:step.genDifficulty,tags:["roadmap:"+step.slug]})});
+        const r=await fetch("/api/questions/generate",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({topic,difficulty,tags:[tag]})});
         const d=await r.json().catch(()=>({}));
         if(!r.ok) throw new Error(d.error||("generate failed ("+r.status+")"));
-        toast(`Added: ${d.title}`);
+        toast(`Added: ${d.title}${d.attempts>1?` (took ${d.attempts} tries)`:""}`);
         const qs=await fetch("/api/questions").then(x=>x.json());
         questions=qs;
         render();
       }catch(e){
         toast("Generate failed: "+e.message);
-        btn.disabled=false;
+        btn.disabled=aiReady?false:true;
       }finally{
-        if(btn.isConnected && btn.disabled && btn.textContent.startsWith("Generating")){ btn.textContent=orig; }
+        if(btn.isConnected && btn.textContent.startsWith("Generating")){ btn.textContent=orig; }
       }
     }
 

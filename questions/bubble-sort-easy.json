@@ -1,0 +1,137 @@
+{
+  "id": "bubble-sort-easy",
+  "title": "Bubble Sort",
+  "difficulty": "Easy",
+  "tags": [
+    "ai-generated",
+    "roadmap:sorting"
+  ],
+  "problemStatement": "Given an integer array <code>nums</code>, sort the array in non‑decreasing order using the Bubble Sort algorithm and return the sorted array. Bubble Sort repeatedly steps through the list, compares adjacent elements and swaps them if they are in the wrong order. The pass through the list is repeated until the list is sorted.",
+  "constraints": [
+    "1 <= nums.length <= 10^4",
+    "-10^5 <= nums[i] <= 10^5"
+  ],
+  "examples": [
+    {
+      "input": "nums = [5,1,4,2,8]",
+      "output": "[1,2,4,5,8]",
+      "explanation": "After applying Bubble Sort, the array becomes sorted as [1,2,4,5,8]."
+    },
+    {
+      "input": "nums = [3,2,1]",
+      "output": "[1,2,3]",
+      "explanation": "Multiple passes swap adjacent elements until the array is sorted."
+    }
+  ],
+  "functionName": "bubbleSort",
+  "pythonFunctionName": "bubble_sort",
+  "cppFunctionName": "bubbleSort",
+  "params": [
+    "nums"
+  ],
+  "starterCode": {
+    "javascript": "function bubbleSort(nums) {\n    // write code here\n}\n",
+    "python": "def bubble_sort(nums):\n    # write code here\n    pass\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nvector<int> bubbleSort(vector<int> nums) {\n    // write code here\n    \n}"
+  },
+  "visibleTestCases": [
+    {
+      "id": "case1",
+      "input": {
+        "nums": [
+          5,
+          1,
+          4,
+          2,
+          8
+        ]
+      },
+      "expectedOutput": [
+        1,
+        2,
+        4,
+        5,
+        8
+      ]
+    },
+    {
+      "id": "case2",
+      "input": {
+        "nums": [
+          3,
+          2,
+          1
+        ]
+      },
+      "expectedOutput": [
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "hiddenTestCases": [
+    {
+      "id": "empty",
+      "input": {
+        "nums": []
+      },
+      "expectedOutput": []
+    },
+    {
+      "id": "single",
+      "input": {
+        "nums": [
+          42
+        ]
+      },
+      "expectedOutput": [
+        42
+      ]
+    },
+    {
+      "id": "duplicates",
+      "input": {
+        "nums": [
+          2,
+          3,
+          2,
+          1,
+          3
+        ]
+      },
+      "expectedOutput": [
+        1,
+        2,
+        2,
+        3,
+        3
+      ]
+    },
+    {
+      "id": "extremes",
+      "input": {
+        "nums": [
+          100000,
+          -100000,
+          0,
+          99999,
+          -99999
+        ]
+      },
+      "expectedOutput": [
+        -100000,
+        -99999,
+        0,
+        99999,
+        100000
+      ]
+    }
+  ],
+  "referenceSolution": "function bubbleSort(nums) {\n    const n = nums.length;\n    for (let i = 0; i < n - 1; i++) {\n        let swapped = false;\n        for (let j = 0; j < n - i - 1; j++) {\n            if (nums[j] > nums[j + 1]) {\n                const temp = nums[j];\n                nums[j] = nums[j + 1];\n                nums[j + 1] = temp;\n                swapped = true;\n            }\n        }\n        if (!swapped) break;\n    }\n    return nums;\n}",
+  "generatedBy": "groq:openai/gpt-oss-120b",
+  "createdAt": "2026-10-03T20:11:39.147Z",
+  "updatedAt": "2026-10-03T20:11:39.147Z",
+  "addedBy": 9,
+  "addedByUsername": "dahiyaprtk"
+}
