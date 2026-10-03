@@ -88,6 +88,23 @@
       </div>`;
     }
 
+    function collapseListItems(items, grp, initial){
+      if(items.length<=initial) return `<ul>${items.join("")}</ul>`;
+      const head=items.slice(0,initial).join("");
+      const tail=items.slice(initial).map(li=>li.replace("<li",`<li class="extra hidden" data-grp="${grp}"`)).join("");
+      return `<ul>${head}${tail}</ul><button class="btn ghost collapse-toggle" data-target="${grp}" data-total="${items.length}" data-open="0" style="padding:4px 10px;font-size:12px;margin-top:6px">Show all ${items.length} ▾</button>`;
+    }
+    // delegated toggle for all collapsed dashboard lists
+    document.addEventListener("click",e=>{
+      const b=e.target && e.target.closest ? e.target.closest(".collapse-toggle") : null;
+      if(!b) return;
+      const root=document.getElementById("dash-root");
+      if(!root || !root.contains(b)) return;
+      const grp=b.dataset.target, open=b.dataset.open==="1";
+      root.querySelectorAll(`li.extra[data-grp="${grp}"]`).forEach(li=>li.classList.toggle("hidden",open));
+      b.dataset.open=open?"0":"1";
+      b.textContent=open?`Show all ${b.dataset.total} ▾`:`Show less ▴`;
+    });
     async function init(){
       const root=document.getElementById("dash-root");
       root.innerHTML=`<div class="loading">Loading dashboard...</div><div style="display:grid;gap:12px;margin-top:16px"><div class="skeleton card" style="height:180px"></div><div class="skeleton card" style="height:120px"></div><div class="skeleton card" style="height:200px"></div></div>`;
@@ -153,12 +170,15 @@
         </div>
       `).join("");
 
-      const recentHtml = recent.length? `<ul>${recent.map(r=>`<li><a href="index.html#${esc(r.questionId)}" class="q-link">${esc(r.title)}</a><span style="display:flex;gap:6px;align-items:center"><span class="badge ${esc(r.difficulty)}">${esc(r.difficulty)}</span><span style="color:var(--muted);font-size:11px">${new Date(r.solvedAt).toLocaleDateString()}</span></span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No solves yet — start solving!</div>`;
+      const recentItems = recent.map(r=>`<li><a href="index.html#${esc(r.questionId)}" class="q-link">${esc(r.title)}</a><span style="display:flex;gap:6px;align-items:center"><span class="badge ${esc(r.difficulty)}">${esc(r.difficulty)}</span><span style="color:var(--muted);font-size:11px">${new Date(r.solvedAt).toLocaleDateString()}</span></span></li>`);
+      const recentHtml = recent.length? collapseListItems(recentItems,"recent",8) : `<div style="color:var(--muted);font-size:13px">No solves yet — start solving!</div>`;
 
-      const unsolvedHtml = unsolved.length? `<ul>${unsolved.slice(0,12).map(q=>`<li><a href="index.html#${esc(q.id)}" class="q-link">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`).join("")}${unsolved.length>12? `<li style="justify-content:center;color:var(--muted)">+${unsolved.length-12} more</li>`:""}</ul>` : `<div style="color:var(--muted);font-size:13px">All caught up! 🎉</div>`;
+      const unsolvedItems = unsolved.map(q=>`<li><a href="index.html#${esc(q.id)}" class="q-link">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`);
+      const unsolvedHtml = unsolved.length? collapseListItems(unsolvedItems,"unsolved",12) : `<div style="color:var(--muted);font-size:13px">All caught up! 🎉</div>`;
 
       const added = questions.filter(q=> String(q.addedBy)===String(me?.id) || (q.addedByUsername && me && q.addedByUsername===me.username));
-      const addedHtml = added.length? `<ul>${added.map(q=>`<li><a href="index.html#${esc(q.id)}" class="q-link">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`).join("")}</ul>` : `<div style="color:var(--muted);font-size:13px">No questions added yet. <a href="add-question.html" style="color:var(--accent)">Add one</a></div>`;
+      const addedItems = added.map(q=>`<li><a href="index.html#${esc(q.id)}" class="q-link">${esc(q.title)}</a><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></li>`);
+      const addedHtml = added.length? collapseListItems(addedItems,"added",8) : `<div style="color:var(--muted);font-size:13px">No questions added yet. <a href="add-question.html" style="color:var(--accent)">Add one</a></div>`;
 
       document.getElementById("dash-root").innerHTML=`
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
