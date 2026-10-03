@@ -58,6 +58,10 @@ function lintCacheSet(key, diagnostics) {
     lintCache.set(key, { diagnostics, ts: Date.now() });
   } catch {}
 }
+// ---------- AI generation guards: per-user rate limit + single flight ----------
+const genRate = new Map(); // userId -> lastAcceptedMs
+const GEN_MIN_GAP_MS = 30000;
+const genInflight = new Set(); // userIds with a generation running
 async function ensureDb() {
   if (!useDb || dbReady) return dbReady;
   try {
@@ -170,6 +174,67 @@ async function getQuestionById(id) {
     }
   }
   return loadQuestionsSync().find(x => x.id === id) || null;
+}
+
+// ---------- shared question validation + persistence (used by manual + AI add) ----------
+function validateQuestionPayload(q) {
+  const errs = [];
+  if (!q.id || !/^[a-z0-9-]+$/.test(q.id)) errs.push("id must match ^[a-z0-9-]+$");
+  if (!q.title) errs.push("title required");
+  if (!["Easy","Medium","Hard"].includes(q.difficulty)) errs.push("difficulty must be Easy/Medium/Hard");
+  if (!q.problemStatement) errs.push("problemStatement required");
+  if (!Array.isArray(q.examples) || q.examples.length===0) errs.push("examples must be a non-empty array");
+  if (!q.functionName) errs.push("functionName required");
+  if (!Array.isArray(q.params) || q.params.length===0) errs.push("params required");
+  if (!q.starterCode || !q.starterCode.javascript) errs.push("starterCode.javascript required");
+  if (!Array.isArray(q.visibleTestCases) || q.visibleTestCases.length===0) errs.push("visibleTestCases must be a non-empty array");
+  if (!Array.isArray(q.hiddenTestCases) || q.hiddenTestCases.length===0) errs.push("hiddenTestCases must be a non-empty array");
+  return errs;
+}
+function validateTestCaseInputs(cases, params) {
+  for (const tc of cases) {
+    if (!tc || !tc.input) return `test case ${tc && tc.id} missing input`;
+    for (const p of params) if (!(p in tc.input)) return `test case ${tc.id}: missing param "${p}"`;
+  }
+  return null;
+}
+async function persistQuestion(q, u) {
+  // throws Error with .status on duplicate; saves to DB (+file backup) and invalidates caches
+  if (!q.createdAt) q.createdAt = new Date().toISOString();
+  q.updatedAt = new Date().toISOString();
+  let savedToDb = false;
+  if (useDb) {
+    await ensureDb();
+    if (dbReady) {
+      try {
+        await db.dbCreateQuestion(q, u.id, u.username);
+        savedToDb = true;
+        console.log(`DB: Created ${q.id} by ${u.username}`);
+      } catch (e) {
+        if (String(e.message).includes("Duplicate")) {
+          const err = new Error(`Question id "${q.id}" already exists.`);
+          err.status = 409;
+          throw err;
+        }
+        console.warn("DB save failed, falling back to file:", e.message);
+      }
+    }
+  }
+  q.addedBy = u.id;
+  q.addedByUsername = u.username;
+  const filePath = path.join(QUESTIONS_DIR, `${q.id}.json`);
+  if (!savedToDb && fs.existsSync(filePath)) {
+    const err = new Error(`Question id "${q.id}" already exists (${q.id}.json). Use different id or delete old file.`);
+    err.status = 409;
+    throw err;
+  }
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify(q, null, 2), "utf8");
+    console.log(`Created ${filePath}`);
+  }
+  cache.questions = null; // invalidate
+  cache.leaderboard.clear();
+  return { savedToDb };
 }
 
 function deepEqual(a, b, qId) {
@@ -918,54 +983,147 @@ const server = http.createServer(async (req, res) => {
     req.on("end", async () => {
       try {
         const q = JSON.parse(body || "{}");
-        const errs = [];
-        if (!q.id || !/^[a-z0-9-]+$/.test(q.id)) errs.push("id must match ^[a-z0-9-]+$");
-        if (!q.title) errs.push("title required");
-        if (!["Easy","Medium","Hard"].includes(q.difficulty)) errs.push("difficulty must be Easy/Medium/Hard");
-        if (!q.problemStatement) errs.push("problemStatement required");
-        if (!Array.isArray(q.examples) || q.examples.length===0) errs.push("examples must be a non-empty array");
-        if (!q.functionName) errs.push("functionName required");
-        if (!Array.isArray(q.params) || q.params.length===0) errs.push("params required");
-        if (!q.starterCode || !q.starterCode.javascript) errs.push("starterCode.javascript required");
-        if (!Array.isArray(q.visibleTestCases) || q.visibleTestCases.length===0) errs.push("visibleTestCases must be a non-empty array");
-        if (!Array.isArray(q.hiddenTestCases) || q.hiddenTestCases.length===0) errs.push("hiddenTestCases must be a non-empty array");
+        const errs = validateQuestionPayload(q);
         if (errs.length) return sendJson(res, { error: errs.join("; ") }, 400);
-        const allCases = [...q.visibleTestCases, ...q.hiddenTestCases];
-        for (const tc of allCases) {
-          if (!tc.input) return sendJson(res, { error: `test case ${tc.id} missing input` }, 400);
-          for (const p of q.params) if (!(p in tc.input)) return sendJson(res, { error: `test case ${tc.id}: missing param "${p}"` }, 400);
-        }
-        if (!q.createdAt) q.createdAt = new Date().toISOString();
-        q.updatedAt = new Date().toISOString();
-        let savedToDb = false;
-        if (useDb) {
-          await ensureDb();
-          if (dbReady) {
-            try {
-              await db.dbCreateQuestion(q, u.id, u.username);
-              savedToDb = true;
-              console.log(`DB: Created ${q.id} by ${u.username}`);
-            } catch (e) {
-              if (String(e.message).includes("Duplicate")) return sendJson(res, { error: `Question id "${q.id}" already exists.` }, 409);
-              console.warn("DB save failed, falling back to file:", e.message);
-            }
-          }
-        }
-        // also store addedBy in file for backup
-        q.addedBy = u.id;
-        q.addedByUsername = u.username;
-        const filePath = path.join(QUESTIONS_DIR, `${q.id}.json`);
-        if (!savedToDb && fs.existsSync(filePath)) return sendJson(res, { error: `Question id "${q.id}" already exists (${q.id}.json). Use different id or delete old file.` }, 409);
-        if (!fs.existsSync(filePath)) {
-          fs.writeFileSync(filePath, JSON.stringify(q, null, 2), "utf8");
-          console.log(`Created ${filePath}`);
-        }
-        cache.questions = null; // invalidate
-        cache.leaderboard.clear();
+        const bad = validateTestCaseInputs([...q.visibleTestCases, ...q.hiddenTestCases], q.params);
+        if (bad) return sendJson(res, { error: bad }, 400);
+        await persistQuestion(q, u);
         return sendJson(res, { ok: true, id: q.id }, 201);
       } catch (e) {
+        if (e && e.status) return sendJson(res, { error: e.message }, e.status);
         console.error(e);
         return sendJson(res, { error: "Invalid JSON: " + e.message }, 400);
+      }
+    });
+    return;
+  }
+
+  // AI models available for question generation
+  if (pathname === "/api/generate/models" && req.method === "GET") {
+    try {
+      const { ALLOWED_MODELS, DEFAULT_MODEL } = require("./server/utils/groq");
+      return sendJson(res, {
+        models: Object.entries(ALLOWED_MODELS).map(([id, m]) => ({ id, label: m.label })),
+        defaultModel: DEFAULT_MODEL,
+        keyConfigured: !!process.env.GROQ_API_KEY,
+      }, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  // AI question generation: Groq proposes, runJS oracle computes expectedOutputs
+  if (pathname === "/api/questions/generate" && req.method === "POST") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        let parsed = {};
+        try { parsed = JSON.parse(body || "{}"); }
+        catch { return sendJson(res, { error: "Invalid JSON body" }, 400); }
+        const topic = String(parsed.topic || "").trim();
+        const difficulty = parsed.difficulty || "Easy";
+        const model = parsed.model || undefined;
+        const extraTags = Array.isArray(parsed.tags) ? parsed.tags.filter(t => typeof t === "string").slice(0, 8) : [];
+        if (!topic || topic.length > 200) return sendJson(res, { error: "topic is required (max 200 chars)" }, 400);
+        if (!["Easy","Medium","Hard"].includes(difficulty)) return sendJson(res, { error: "difficulty must be Easy/Medium/Hard" }, 400);
+        const { groqChat, extractJson, buildGenerationPrompt, ALLOWED_MODELS, DEFAULT_MODEL } = require("./server/utils/groq");
+        if (model && !ALLOWED_MODELS[model]) return sendJson(res, { error: `model must be one of: ${Object.keys(ALLOWED_MODELS).join(", ")}` }, 400);
+        if (!process.env.GROQ_API_KEY) return sendJson(res, { error: "AI generation not configured (GROQ_API_KEY missing)" }, 503);
+        const now = Date.now();
+        const last = genRate.get(u.id) || 0;
+        if (now - last < GEN_MIN_GAP_MS) return sendJson(res, { error: `Rate limited: wait ${Math.ceil((GEN_MIN_GAP_MS - (now - last)) / 1000)}s before generating again` }, 429);
+        if (genInflight.has(u.id)) return sendJson(res, { error: "A generation is already in progress for this user" }, 429);
+        genRate.set(u.id, now);
+        genInflight.add(u.id);
+        try {
+          const { runJS } = require("./server/utils/runner");
+          const { content, model: usedModel } = await groqChat(buildGenerationPrompt(topic, difficulty, extraTags), model);
+          let draft;
+          try { draft = extractJson(content); }
+          catch { return sendJson(res, { error: "Model returned invalid JSON — try again" }, 502); }
+          // structural validation of the draft (inputs, not outputs)
+          if (!draft || typeof draft !== "object") return sendJson(res, { error: "Model returned an invalid draft" }, 502);
+          const draftErrs = [];
+          if (!draft.id || !/^[a-z0-9-]+$/.test(draft.id)) draftErrs.push("draft id must match ^[a-z0-9-]+$");
+          if (!draft.title) draftErrs.push("draft title required");
+          if (!draft.problemStatement) draftErrs.push("draft problemStatement required");
+          if (!draft.functionName) draftErrs.push("draft functionName required");
+          if (!Array.isArray(draft.params) || draft.params.length === 0 || !draft.params.every(p => typeof p === "string")) draftErrs.push("draft params must be a non-empty string array");
+          if (!draft.starterCode || !draft.starterCode.javascript) draftErrs.push("draft starterCode.javascript required");
+          if (!Array.isArray(draft.examples) || draft.examples.length === 0) draftErrs.push("draft examples must be a non-empty array");
+          if (!Array.isArray(draft.testInputsVisible) || draft.testInputsVisible.length === 0) draftErrs.push("draft testInputsVisible must be a non-empty array");
+          if (!Array.isArray(draft.testInputsHidden) || draft.testInputsHidden.length === 0) draftErrs.push("draft testInputsHidden must be a non-empty array");
+          if (typeof draft.referenceSolution !== "string" || !draft.referenceSolution.includes(draft.functionName)) draftErrs.push("draft referenceSolution must define functionName");
+          if (draftErrs.length) return sendJson(res, { error: "Model draft invalid: " + draftErrs.join("; ") }, 502);
+          const badIn = validateTestCaseInputs([...draft.testInputsVisible, ...draft.testInputsHidden], draft.params);
+          if (badIn) return sendJson(res, { error: "Model draft invalid: " + badIn }, 502);
+          // oracle: run reference solution to compute every expectedOutput
+          const shell = { id: draft.id, functionName: draft.functionName, params: draft.params };
+          const fillOutputs = (list) => {
+            return list.map((tc, i) => {
+              let actual;
+              try {
+                actual = runJS(draft.referenceSolution, shell, tc.input, null);
+              } catch (e) {
+                const err = new Error(`Reference solution failed on test input ${tc.id}: ${e.message}`);
+                err.status = 502;
+                throw err;
+              }
+              try { actual = JSON.parse(JSON.stringify(actual)); }
+              catch {
+                const err = new Error(`Reference solution returned non-serializable output on ${tc.id}`);
+                err.status = 502;
+                throw err;
+              }
+              if (actual === undefined) {
+                const err = new Error(`Reference solution returned undefined on ${tc.id}`);
+                err.status = 502;
+                throw err;
+              }
+              return { id: tc.id || `t${i + 1}`, input: tc.input, expectedOutput: actual };
+            });
+          };
+          const visibleTestCases = fillOutputs(draft.testInputsVisible);
+          const hiddenTestCases = fillOutputs(draft.testInputsHidden);
+          const existing = await getQuestionById(draft.id);
+          if (existing) {
+            const err = new Error(`Question id "${draft.id}" already exists.`);
+            err.status = 409;
+            throw err;
+          }
+          const tagSet = ["ai-generated", ...(Array.isArray(draft.tags) ? draft.tags.filter(t => typeof t === "string") : []), ...extraTags];
+          const q = {
+            id: draft.id,
+            title: draft.title,
+            difficulty,
+            tags: [...new Set(tagSet)],
+            problemStatement: draft.problemStatement,
+            constraints: Array.isArray(draft.constraints) ? draft.constraints : [],
+            examples: draft.examples,
+            functionName: draft.functionName,
+            pythonFunctionName: draft.pythonFunctionName || undefined,
+            params: draft.params,
+            starterCode: draft.starterCode,
+            visibleTestCases,
+            hiddenTestCases,
+            referenceSolution: draft.referenceSolution,
+            generatedBy: "groq:" + usedModel,
+          };
+          if (!q.pythonFunctionName) delete q.pythonFunctionName;
+          const errs = validateQuestionPayload(q);
+          if (errs.length) return sendJson(res, { error: "Generated question invalid: " + errs.join("; ") }, 502);
+          await persistQuestion(q, u);
+          return sendJson(res, {
+            ok: true, id: q.id, title: q.title, difficulty: q.difficulty,
+            visible: visibleTestCases.length, hidden: hiddenTestCases.length, model: usedModel,
+          }, 201);
+        } finally {
+          genInflight.delete(u.id);
+        }
+      } catch (e) {
+        if (e && e.status) return sendJson(res, { error: e.message }, e.status);
+        console.error("generate failed:", e);
+        return sendJson(res, { error: "Generation failed: " + e.message }, 500);
       }
     });
     return;
