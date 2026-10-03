@@ -85,7 +85,7 @@
       return n===t || (n.length>=6 && (t.includes(n) || n.includes(t)));
     }
 
-    let questions=[], solvedSet=new Set(), attemptedSet=new Set(), aiReady=false;
+    let questions=[], statsMap={}, solvedSet=new Set(), attemptedSet=new Set(), aiReady=false;
 
     function stepQuestions(step){
       const tag="roadmap:"+step.slug;
@@ -101,11 +101,14 @@
     }
 
     async function loadAll(){
-      const [qs, models] = await Promise.all([
+      const [qs, models, st] = await Promise.all([
         fetch("/api/questions").then(r=>{ if(!r.ok) throw new Error("questions failed"); return r.json(); }),
         fetch("/api/generate/models").then(r=>r.ok?r.json():null).catch(()=>null),
+        fetch("/api/questions/stats").then(r=>{ if(!r.ok) return []; return r.json(); }).catch(()=>[]),
       ]);
       questions = qs;
+      statsMap = {};
+      (st||[]).forEach(s=>{ statsMap[s.questionId]={attempted:s.attempted||0, submissions:s.submissions||0, solved:s.solved||0}; });
       aiReady = !!(models && models.keyConfigured);
       if(!aiReady){
         const n=$("#ai-note");
@@ -124,10 +127,18 @@
       }
     }
 
-    function chip(q){
-      const mark=solvedSet.has(q.id)?'<span style="color:#00b8a3;font-weight:700">✓</span>':(attemptedSet.has(q.id)?'<span style="color:#ffa116;font-weight:700">●</span>':'<span style="color:var(--muted)">·</span>');
-      const ai=(q.tags||[]).includes("ai-generated")?' <span style="font-size:10px;color:var(--muted)">AI</span>':"";
-      return `<a href="index.html#${esc(q.id)}" style="display:inline-flex;align-items:center;gap:5px;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:12px;color:var(--text);text-decoration:none;margin:0 6px 6px 0">${mark}${esc(q.title)}${ai}</a>`;
+    function qRow(q){
+      const mark=solvedSet.has(q.id)?'<span style="color:#00b8a3;font-weight:700" title="Solved">✓</span>':(attemptedSet.has(q.id)?'<span style="color:#ffa116;font-weight:700" title="Attempted">●</span>':'<span style="color:var(--muted)" title="Todo">·</span>');
+      const ai=(q.tags||[]).includes("ai-generated")?' <span style="font-size:10px;color:var(--muted)" title="AI generated">AI</span>':"";
+      const topics=(q.tags||[]).filter(t=>t!=="ai-generated"&&!t.startsWith("roadmap:"));
+      const s=statsMap[q.id]||{attempted:0,submissions:0,solved:0};
+      const rate=s.attempted?Math.round(s.solved/s.attempted*100)+"%":"–";
+      return `<div style="display:flex;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid var(--border);font-size:13px;flex-wrap:wrap">
+        ${mark}<a href="index.html#${esc(q.id)}" style="font-weight:600;color:var(--text);text-decoration:none">${esc(q.title)}</a>${ai}
+        <span class="badge ${esc(q.difficulty)}" style="font-size:11px">${esc(q.difficulty)}</span>
+        <span style="color:var(--muted);font-size:12px">${topics.map(esc).join(" · ")||"general"}</span>
+        <span style="margin-left:auto;font-size:12px;color:var(--muted)" title="${s.submissions} total tries">${s.attempted} attempted · ${s.solved} solved · ${rate}</span>
+      </div>`;
     }
 
     function render(){
@@ -139,11 +150,12 @@
       $("#steps").innerHTML=perStep.map(({step:s, matched:qs, missing},i)=>{
         const done=qs.filter(q=>solvedSet.has(q.id)).length;
         const pct=qs.length?Math.round(done/qs.length*100):0;
-        const list=qs.length?qs.map(chip).join(""):'<span style="color:var(--muted);font-size:12px">Nothing here yet.</span>';
+        const list=qs.length?qs.map(qRow).join(""):'<span style="color:var(--muted);font-size:12px">Nothing here yet.</span>';
         const missingRows=missing.length?missing.map(n=>`
-          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed var(--border);font-size:13px">
+          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed var(--border);font-size:13px;flex-wrap:wrap">
             <span style="color:var(--muted)">○ ${esc(n)}</span>
-            <span style="font-size:11px;color:var(--muted)">missing</span>
+            <span class="badge ${esc(s.genDifficulty)}" style="font-size:11px">${esc(s.genDifficulty)}</span>
+            <span style="font-size:11px;color:var(--muted)">planned · ${esc(s.title)} · missing</span>
             <button class="btn ghost gen-one" data-topic="${esc(n)}" data-diff="${esc(s.genDifficulty)}" data-tag="roadmap:${esc(s.slug)}" style="padding:4px 10px;font-size:12px;margin-left:auto" ${aiReady?"":"disabled title='AI not configured'"}>✨ Generate</button>
           </div>`).join(""):'<div style="font-size:12px;color:#00b8a3;padding:6px 0">All planned questions present ✓</div>';
         return `<div style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px">
