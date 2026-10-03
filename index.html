@@ -93,6 +93,7 @@
             </select>
             <button id="format-btn" class="btn ghost" title="Auto-format (keeps indent)">Format</button>
             <button id="reset-btn" class="btn ghost" title="Reset to starter code">Reset</button>
+            <button id="shortcuts-btn" class="btn ghost" title="Keyboard shortcuts">⌨</button>
           </div>
           <div class="editor-actions">
             <button id="run-btn" class="btn secondary">Run</button>
@@ -136,6 +137,33 @@
   <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
 
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Shortcuts Modal -->
+  <div id="shortcuts-modal" class="modal hidden">
+    <div class="modal-backdrop" id="shortcuts-backdrop"></div>
+    <div class="modal-panel" style="max-width:480px">
+      <div class="modal-header">
+        <h2>Keyboard shortcuts</h2>
+        <button id="shortcuts-close" class="btn ghost" style="padding:4px 8px">✕</button>
+      </div>
+      <div style="padding:14px 16px;overflow-y:auto">
+        <table class="shortcuts-table">
+          <tr><td><span class="kbd">Tab</span> / <span class="kbd">Shift+Tab</span></td><td>Indent / unindent (accept suggestion when open)</td></tr>
+          <tr><td><span class="kbd">Enter</span></td><td>New line (never accepts suggestions)</td></tr>
+          <tr><td><span class="kbd">Ctrl+Z</span> / <span class="kbd">Ctrl+Shift+Z</span>, <span class="kbd">Ctrl+Y</span></td><td>Undo / redo</td></tr>
+          <tr><td><span class="kbd">Ctrl+S</span></td><td>Save now</td></tr>
+          <tr><td><span class="kbd">Ctrl+Shift+F</span></td><td>Format code</td></tr>
+          <tr><td><span class="kbd">Ctrl+/</span></td><td>Toggle line comment</td></tr>
+          <tr><td><span class="kbd">Ctrl+D</span></td><td>Duplicate line(s)</td></tr>
+          <tr><td><span class="kbd">Alt+↑</span> / <span class="kbd">Alt+↓</span></td><td>Move line(s) up / down</td></tr>
+          <tr><td><span class="kbd">Ctrl+Space</span></td><td>Show suggestions</td></tr>
+          <tr><td><span class="kbd">Esc</span></td><td>Close popup</td></tr>
+          <tr><td><span class="kbd">Ctrl+Enter</span> / <span class="kbd">Ctrl+Shift+Enter</span></td><td>Run / Submit</td></tr>
+        </table>
+        <p style="color:var(--muted);font-size:12px;margin-top:10px">Ctrl works as ⌘ on macOS.</p>
+      </div>
+    </div>
+  </div>
 
   <!-- Add Question Modal -->
   <div id="add-modal" class="modal hidden">

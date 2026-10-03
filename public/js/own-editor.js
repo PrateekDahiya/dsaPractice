@@ -868,6 +868,104 @@
     try { if (suggestEl) { suggestEl.style.display = 'none'; suggestEl.classList.add('hidden'); } } catch (e) {}
   }
 
+  /* ---------- edit actions (all undoable, single unit each) ---------- */
+  function trackEdit() {
+    scheduleRender();
+    scheduleLint();
+    notifyDocChange();
+    fireEditorInput();
+    restoring = false;
+    try { lastDocValue = ta.value; } catch (e) {}
+    try { lastDocSel = curSel(); } catch (e2) {}
+    lastPushTime = 0;
+  }
+  function commentToken() { return state.lang === 'python' ? '#' : '//'; }
+  function toggleComment() {
+    var v = ta.value, cs = ta.selectionStart, ce = ta.selectionEnd;
+    var ls = v.lastIndexOf('\n', cs - 1) + 1;
+    var le = v.indexOf('\n', ce);
+    if (le === -1) le = v.length;
+    var lines = v.substring(ls, le).split('\n');
+    var tok = commentToken();
+    var hasCode = false, allC = true, i;
+    for (i = 0; i < lines.length; i++) {
+      if (lines[i].trim() !== '') { hasCode = true; break; }
+    }
+    if (!hasCode) return false;
+    for (i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (t !== '' && t.indexOf(tok) !== 0) { allC = false; break; }
+    }
+    var rx = tok === '#' ? /^(\s*)#\s?/ : /^(\s*)\/\/\s?/;
+    var out = lines.map(function (l) {
+      if (l.trim() === '') return l;
+      if (allC) return l.replace(rx, '$1');
+      var m = l.match(/^(\s*)/);
+      var ind = m ? m[1] : '';
+      return ind + tok + ' ' + l.slice(ind.length);
+    }).join('\n');
+    pushSnapshot(true);
+    redoStack.length = 0;
+    restoring = true;
+    ta.value = v.substring(0, ls) + out + v.substring(le);
+    ta.selectionStart = ls;
+    ta.selectionEnd = ls + out.length;
+    trackEdit();
+    return true;
+  }
+  function duplicateLines() {
+    var v = ta.value, cs = ta.selectionStart, ce = ta.selectionEnd;
+    var ls = v.lastIndexOf('\n', cs - 1) + 1;
+    var le = v.indexOf('\n', ce);
+    if (le === -1) le = v.length;
+    var block = v.substring(ls, le);
+    pushSnapshot(true);
+    redoStack.length = 0;
+    restoring = true;
+    ta.value = v.substring(0, le) + '\n' + block + v.substring(le);
+    var shift = block.length + 1;
+    ta.selectionStart = cs + shift;
+    ta.selectionEnd = ce + shift;
+    trackEdit();
+    return true;
+  }
+  function moveLines(dir) {
+    var v = ta.value, cs = ta.selectionStart, ce = ta.selectionEnd;
+    var ls = v.lastIndexOf('\n', cs - 1) + 1;
+    var le = v.indexOf('\n', ce);
+    if (le === -1) le = v.length;
+    var block = v.substring(ls, le);
+    if (dir < 0 && ls === 0) return false;
+    if (dir > 0 && le >= v.length) return false;
+    pushSnapshot(true);
+    redoStack.length = 0;
+    restoring = true;
+    if (dir < 0) {
+      var pls = v.lastIndexOf('\n', ls - 2) + 1;
+      var prev = v.substring(pls, ls - 1);
+      var rest = v.substring(le);
+      ta.value = v.substring(0, pls) + block + '\n' + prev + rest;
+      var d = ls - pls;
+      ta.selectionStart = cs - d;
+      ta.selectionEnd = ce - d;
+    } else {
+      var nle = v.indexOf('\n', le + 1);
+      if (nle === -1) nle = v.length;
+      var next = v.substring(le + 1, nle);
+      var rest2 = v.substring(nle);
+      ta.value = v.substring(0, ls) + next + '\n' + block + rest2;
+      var d2 = nle - ls;
+      ta.selectionStart = cs + d2;
+      ta.selectionEnd = ce + d2;
+    }
+    trackEdit();
+    return true;
+  }
+  function forceSuggest() {
+    if (composing || !suggestEl) return;
+    refreshSuggest('.');
+  }
+
   function paintSugSel() {
     if (!suggestEl) return;
     var kids = suggestEl.children;
@@ -1042,6 +1140,63 @@
         }
       }
     } catch (eU) {}
+    /* ---------- editor shortcuts (before the modifier guard below) ---------- */
+    try {
+      var mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.altKey && (e.key === 's' || e.key === 'S')) {
+        /* Ctrl+S: save now (blocks browser save dialog) */
+        e.preventDefault();
+        hideSuggest(); hideHover();
+        try { if (typeof window.saveCodeToDb === 'function') { var _r = window.saveCodeToDb(); if (_r && _r.catch) _r.catch(function () {}); } } catch (eS) {}
+        try { if (typeof window.toast === 'function') window.toast('Saved \u2713'); } catch (eT) {}
+        return;
+      }
+      if (mod && e.shiftKey && !e.altKey && (e.key === 'F' || e.key === 'f')) {
+        /* Ctrl+Shift+F: format (reuses the Format button logic) */
+        e.preventDefault();
+        hideSuggest(); hideHover();
+        try { var _fb = document.getElementById('format-btn'); if (_fb && _fb.click) _fb.click(); } catch (eF) {}
+        return;
+      }
+      if (mod && !e.shiftKey && !e.altKey && (e.key === '/' || e.key === '?')) {
+        /* Ctrl+/: toggle line comment */
+        e.preventDefault();
+        hideSuggest(); hideHover();
+        if (toggleComment()) return;
+        return;
+      }
+      if (mod && !e.altKey && (e.key === 'd' || e.key === 'D') && !e.shiftKey) {
+        /* Ctrl+D: duplicate line(s) */
+        e.preventDefault();
+        hideSuggest(); hideHover();
+        if (duplicateLines()) return;
+        return;
+      }
+      if (((e.key === 'Enter' && mod) || e.key === 'F9')) {
+        /* Ctrl+Enter: Run, Ctrl+Shift+Enter: Submit */
+        e.preventDefault();
+        hideSuggest(); hideHover();
+        try {
+          if (typeof window.execute === 'function') {
+            window.execute(e.shiftKey ? 'submit' : 'run');
+          }
+        } catch (eR) {}
+        return;
+      }
+      if (e.key === ' ' && mod && !e.shiftKey && !e.altKey) {
+        /* Ctrl+Space: force suggestions */
+        e.preventDefault();
+        forceSuggest();
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        /* Alt+Up/Down: move line(s) */
+        e.preventDefault();
+        hideSuggest(); hideHover();
+        if (moveLines(e.key === 'ArrowUp' ? -1 : 1)) return;
+        return;
+      }
+    } catch (eSC) {}
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     /* auto-close pairs + skip-over closers (textarea target phase; the
      * window-capture suggest nav runs first and stops propagation while
@@ -1530,8 +1685,29 @@
     document.addEventListener('scroll', hideHover, true);
     window.addEventListener('resize', function () { hideHover(); hideSuggest(); });
     window.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { hideHover(); }
+      if (e.key === 'Escape') { hideHover(); closeShortcuts(); }
     }, true);
+  /* shortcuts modal (self-contained; ids from index.html) */
+  function openShortcuts() {
+    var m = null;
+    try { m = document.getElementById('shortcuts-modal'); } catch (e) { return; }
+    if (!m) return;
+    try { m.classList.remove('hidden'); } catch (e2) {}
+  }
+  function closeShortcuts() {
+    try {
+      var m = document.getElementById('shortcuts-modal');
+      if (m) m.classList.add('hidden');
+    } catch (e) {}
+  }
+  try {
+    var _sb = document.getElementById('shortcuts-btn');
+    if (_sb) _sb.addEventListener('click', openShortcuts);
+    var _sc = document.getElementById('shortcuts-close');
+    if (_sc) _sc.addEventListener('click', closeShortcuts);
+    var _sd = document.getElementById('shortcuts-backdrop');
+    if (_sd) _sd.addEventListener('click', closeShortcuts);
+  } catch (e3) {}
   } catch (e2) {}
 
   /* ================= public API ================= */
