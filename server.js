@@ -1037,59 +1037,65 @@ const server = http.createServer(async (req, res) => {
         genInflight.add(u.id);
         try {
           const { runJS } = require("./server/utils/runner");
-          const { content, model: usedModel } = await groqChat(buildGenerationPrompt(topic, difficulty, extraTags), model);
-          let draft;
-          try { draft = extractJson(content); }
-          catch { return sendJson(res, { error: "Model returned invalid JSON — try again" }, 502); }
-          // structural validation of the draft (inputs, not outputs)
-          if (!draft || typeof draft !== "object") return sendJson(res, { error: "Model returned an invalid draft" }, 502);
-          const draftErrs = [];
-          if (!draft.id || !/^[a-z0-9-]+$/.test(draft.id)) draftErrs.push("draft id must match ^[a-z0-9-]+$");
-          if (!draft.title) draftErrs.push("draft title required");
-          if (!draft.problemStatement) draftErrs.push("draft problemStatement required");
-          if (!draft.functionName) draftErrs.push("draft functionName required");
-          if (!Array.isArray(draft.params) || draft.params.length === 0 || !draft.params.every(p => typeof p === "string")) draftErrs.push("draft params must be a non-empty string array");
-          if (!draft.starterCode || !draft.starterCode.javascript) draftErrs.push("draft starterCode.javascript required");
-          if (!Array.isArray(draft.examples) || draft.examples.length === 0) draftErrs.push("draft examples must be a non-empty array");
-          if (!Array.isArray(draft.testInputsVisible) || draft.testInputsVisible.length === 0) draftErrs.push("draft testInputsVisible must be a non-empty array");
-          if (!Array.isArray(draft.testInputsHidden) || draft.testInputsHidden.length === 0) draftErrs.push("draft testInputsHidden must be a non-empty array");
-          if (typeof draft.referenceSolution !== "string" || !draft.referenceSolution.includes(draft.functionName)) draftErrs.push("draft referenceSolution must define functionName");
-          if (draftErrs.length) return sendJson(res, { error: "Model draft invalid: " + draftErrs.join("; ") }, 502);
-          const badIn = validateTestCaseInputs([...draft.testInputsVisible, ...draft.testInputsHidden], draft.params);
-          if (badIn) return sendJson(res, { error: "Model draft invalid: " + badIn }, 502);
-          // oracle: run reference solution to compute every expectedOutput
-          const shell = { id: draft.id, functionName: draft.functionName, params: draft.params };
-          const fillOutputs = (list) => {
-            return list.map((tc, i) => {
-              let actual;
+          const { groqChat, extractJson, buildGenerationPrompt, validateDraft, ALLOWED_MODELS, DEFAULT_MODEL } = require("./server/utils/groq");
+          const messages = buildGenerationPrompt(topic, difficulty, extraTags);
+          const MAX_ATTEMPTS = 3;
+          let draft = null, usedModel = null, visibleTestCases = null, hiddenTestCases = null;
+          let lastError = "unknown error", attempts = 0;
+          for (attempts = 1; attempts <= MAX_ATTEMPTS; attempts++) {
+            let content;
+            try {
+              const r = await groqChat(messages, model);
+              content = r.content; usedModel = r.model;
+            } catch (e) {
+              lastError = e.message; // transport / Groq rate errors: surface immediately, don't burn retries
+              break;
+            }
+            messages.push({ role: "assistant", content });
+            let reasons = [];
+            try { draft = extractJson(content); }
+            catch { reasons.push("output was not valid JSON"); draft = null; }
+            if (draft) {
+              reasons = validateDraft(draft, difficulty);
+              if (!reasons.length) {
+                const badIn = validateTestCaseInputs([...draft.testInputsVisible, ...draft.testInputsHidden], draft.params);
+                if (badIn) reasons.push(badIn);
+              }
+              if (!reasons.length) {
+                const existing = await getQuestionById(draft.id);
+                if (existing) reasons.push(`id "${draft.id}" already exists — pick a different slug`);
+              }
+            }
+            if (!reasons.length) {
+              // oracle: run reference solution to compute every expectedOutput
+              const shell = { id: draft.id, functionName: draft.functionName, params: draft.params };
               try {
-                actual = runJS(draft.referenceSolution, shell, tc.input, null);
-              } catch (e) {
-                const err = new Error(`Reference solution failed on test input ${tc.id}: ${e.message}`);
-                err.status = 502;
-                throw err;
-              }
-              try { actual = JSON.parse(JSON.stringify(actual)); }
-              catch {
-                const err = new Error(`Reference solution returned non-serializable output on ${tc.id}`);
-                err.status = 502;
-                throw err;
-              }
-              if (actual === undefined) {
-                const err = new Error(`Reference solution returned undefined on ${tc.id}`);
-                err.status = 502;
-                throw err;
-              }
-              return { id: tc.id || `t${i + 1}`, input: tc.input, expectedOutput: actual };
-            });
-          };
-          const visibleTestCases = fillOutputs(draft.testInputsVisible);
-          const hiddenTestCases = fillOutputs(draft.testInputsHidden);
-          const existing = await getQuestionById(draft.id);
-          if (existing) {
-            const err = new Error(`Question id "${draft.id}" already exists.`);
-            err.status = 409;
-            throw err;
+                const fill = (list) => list.map((tc, i) => {
+                  let actual;
+                  try { actual = runJS(draft.referenceSolution, shell, tc.input, null); }
+                  catch (e) { throw new Error(`reference solution failed on test input ${tc.id}: ${e.message}`); }
+                  try { actual = JSON.parse(JSON.stringify(actual)); }
+                  catch { throw new Error(`reference solution returned non-serializable output on ${tc.id}`); }
+                  if (actual === undefined) throw new Error(`reference solution returned undefined on ${tc.id}`);
+                  return { id: tc.id || `t${i + 1}`, input: tc.input, expectedOutput: actual };
+                });
+                const v = fill(draft.testInputsVisible), h = fill(draft.testInputsHidden);
+                const outs = [...v, ...h].map(tc => JSON.stringify(tc.expectedOutput));
+                const ins = [...v, ...h].map(tc => JSON.stringify(tc.input));
+                if (new Set(outs).size === 1 && new Set(ins).size > 1) {
+                  throw new Error("reference solution returns the same output for every input — it is likely wrong");
+                }
+                visibleTestCases = v; hiddenTestCases = h;
+              } catch (e) { reasons.push(e.message); }
+            }
+            if (!reasons.length) break;
+            lastError = reasons.join("; ");
+            console.warn(`generate attempt ${attempts} invalid: ${lastError}`);
+            messages.push({ role: "user", content: `Your previous draft failed validation: ${lastError}. Fix ONLY those issues and output the FULL corrected JSON object again (no prose, no fences).` });
+            draft = null; visibleTestCases = null; hiddenTestCases = null;
+          }
+          if (!draft || !visibleTestCases) {
+            return sendJson(res, { error: `AI could not produce a valid question after ${attempts} attempt(s): ${lastError}` }, 502);
           }
           const tagSet = ["ai-generated", ...(Array.isArray(draft.tags) ? draft.tags.filter(t => typeof t === "string") : []), ...extraTags];
           const q = {
@@ -1102,6 +1108,7 @@ const server = http.createServer(async (req, res) => {
             examples: draft.examples,
             functionName: draft.functionName,
             pythonFunctionName: draft.pythonFunctionName || undefined,
+            cppFunctionName: draft.cppFunctionName || undefined,
             params: draft.params,
             starterCode: draft.starterCode,
             visibleTestCases,
@@ -1110,12 +1117,13 @@ const server = http.createServer(async (req, res) => {
             generatedBy: "groq:" + usedModel,
           };
           if (!q.pythonFunctionName) delete q.pythonFunctionName;
+          if (!q.cppFunctionName) delete q.cppFunctionName;
           const errs = validateQuestionPayload(q);
           if (errs.length) return sendJson(res, { error: "Generated question invalid: " + errs.join("; ") }, 502);
           await persistQuestion(q, u);
           return sendJson(res, {
             ok: true, id: q.id, title: q.title, difficulty: q.difficulty,
-            visible: visibleTestCases.length, hidden: hiddenTestCases.length, model: usedModel,
+            visible: visibleTestCases.length, hidden: hiddenTestCases.length, model: usedModel, attempts,
           }, 201);
         } finally {
           genInflight.delete(u.id);
