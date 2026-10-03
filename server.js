@@ -896,6 +896,14 @@ const server = http.createServer(async (req, res) => {
     cache.questionsTs = now;
     return sendJson(res, summaries);
   }
+  if (pathname === "/api/questions/stats" && req.method === "GET") {
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, [], 200);
+      const rows = await db.getQuestionStats();
+      return sendJson(res, rows, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname.startsWith("/api/questions/") && req.method === "GET") {
     const id = decodeURIComponent(pathname.slice("/api/questions/".length));
     const q = await getQuestionById(id);

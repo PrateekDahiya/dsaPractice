@@ -4,7 +4,7 @@ const { migrateFromFiles, dbLoadQuestions, dbGetQuestion, dbCreateQuestion } = r
 const { createUser, findUserByUsername, findUserById, findUserByEmail } = require('./users');
 const { dbSaveCode, dbGetCode } = require('./code');
 const { dbCreateSubmission, dbGetSubmissions } = require('./submissions');
-const { getSolvedIds, getStats, getLeaderboard, getUserDashboard, clearStatsCache } = require('./stats');
+const { getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, clearStatsCache } = require('./stats');
 const { markDone, unmarkDone, getManualSolvedIds, isMarkedDone } = require('./manual');
 const { seedMethodDocs, searchMethods, getMethodDoc } = require('./methods');
 
@@ -14,7 +14,7 @@ module.exports = {
   createUser, findUserByUsername, findUserById, findUserByEmail,
   dbSaveCode, dbGetCode,
   dbCreateSubmission, dbGetSubmissions,
-  getSolvedIds, getStats, getLeaderboard, getUserDashboard, clearStatsCache,
+  getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, clearStatsCache,
   markDone, unmarkDone, getManualSolvedIds, isMarkedDone,
   seedMethodDocs, searchMethods, getMethodDoc
 };

@@ -207,4 +207,34 @@ async function getUserDashboard(userId) {
   return { stats, submissions, solvedIds };
 }
 
-module.exports = { toISODate, buildEmptyCalendar, getSolvedIds, getStats, getLeaderboard, getUserDashboard, clearStatsCache };
+async function getQuestionStats() {
+  // Per-question community stats: distinct attempters, total submissions, distinct solvers.
+  // userId NULL (anon) rows count toward submissions but not toward people counts.
+  try {
+    const [rows] = await getPool().query(
+      `SELECT qid AS questionId,
+        SUM(n_sub) as submissions,
+        COUNT(DISTINCT uid) as attempted,
+        COUNT(DISTINCT CASE WHEN solved_flag=1 THEN uid END) as solved
+       FROM (
+         SELECT questionId AS qid, userId AS uid, 1 AS n_sub,
+           CASE WHEN passed=total AND mode='submit' THEN 1 ELSE 0 END AS solved_flag
+         FROM submissions
+         UNION ALL
+         SELECT questionId AS qid, userId AS uid, 0 AS n_sub, 1 AS solved_flag
+         FROM manual_solved
+       ) u GROUP BY qid`
+    );
+    return rows.map(r => ({
+      questionId: r.questionId,
+      submissions: Number(r.submissions) || 0,
+      attempted: Number(r.attempted) || 0,
+      solved: Number(r.solved) || 0,
+    }));
+  } catch (e) {
+    if (String(e.message).includes("doesn't exist")) return [];
+    throw e;
+  }
+}
+
+module.exports = { toISODate, buildEmptyCalendar, getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, clearStatsCache };

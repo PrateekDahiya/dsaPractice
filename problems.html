@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>All Problems — DSA Practice</title>
+  <link rel="icon" type="image/png" href="public/logo.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text);display:flex;align-items:center;gap:8px"><img src="public/logo.png" alt="Logo" style="height:32px;width:auto;border-radius:6px;object-fit:contain"> DSA Practice</a>
+      <nav style="display:flex;gap:8px;margin-left:10px">
+        <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="problems.html" class="ghost-link" style="border-color:var(--accent);color:var(--text)">Browse</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="index.html" class="ghost-link">Problems</a>
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="lb-wrap" style="max-width:1100px">
+    <h1 style="font-size:22px;margin-bottom:6px">All Problems</h1>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px" id="problems-sub">Loading...</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <input id="search-input" placeholder="Search title/tag..." style="flex:2;min-width:160px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+      <select id="difficulty-filter" title="Difficulty" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+        <option value="all">All difficulties</option>
+        <option value="Easy">Easy</option>
+        <option value="Medium">Medium</option>
+        <option value="Hard">Hard</option>
+      </select>
+      <select id="tag-filter" title="Tag" style="flex:1;min-width:120px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px"><option value="all">All tags</option></select>
+      <select id="status-filter" title="My status" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+        <option value="all">All statuses</option>
+        <option value="solved">Solved by me</option>
+        <option value="attempted">Attempted</option>
+        <option value="todo">Todo</option>
+      </select>
+      <select id="sort-select" title="Sort" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+        <option value="recent">Recently added</option>
+        <option value="title">Title A–Z</option>
+        <option value="difficulty">Difficulty</option>
+        <option value="attempted">Most attempted</option>
+        <option value="solved">Most solved</option>
+        <option value="rate">Highest success rate</option>
+      </select>
+    </div>
+    <div id="problems-loading" style="color:var(--muted);padding:20px;text-align:center">Loading...</div>
+    <table class="lb-table hidden" id="problems-table">
+      <thead>
+        <tr>
+          <th style="width:50px">#</th>
+          <th>Title</th>
+          <th style="width:100px">Difficulty</th>
+          <th style="width:110px">Attempted</th>
+          <th style="width:100px">Solved</th>
+          <th style="width:150px">Success rate</th>
+          <th style="width:90px">You</th>
+        </tr>
+      </thead>
+      <tbody id="problems-body"></tbody>
+    </table>
+    <div id="problems-empty" class="hidden" style="color:var(--muted);padding:20px;text-align:center">No problems match the filters.</div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    function clearAuth(){ localStorage.removeItem("token"); localStorage.removeItem("user"); }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    function updateTopbar(){
+      const user=getUser();
+      const a=$("#auth-area");
+      if(!a) return;
+      if(user && getToken()){
+        a.innerHTML=`<a href="dashboard.html" style="font-weight:600;font-size:13px;color:var(--text);text-decoration:none">${esc(user.username)}</a><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
+        document.getElementById("logout-btn")?.addEventListener("click",()=>{ clearAuth(); location.reload(); });
+      } else {
+        a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
+      }
+    }
+    function showLoader(){ const el=document.getElementById("top-loader"); if(el){ el.classList.remove("done"); el.classList.add("active"); void el.offsetWidth; el.style.width="70%"; } }
+    function hideLoader(){ const el=document.getElementById("top-loader"); if(el){ el.style.width="100%"; el.classList.add("done"); setTimeout(()=>{ el.classList.remove("active","done"); el.style.width="0%"; },300); } }
+
+    let questions=[], statsMap={}, solvedSet=new Set(), attemptedSet=new Set();
+    async function loadAll(){
+      const [qs, st] = await Promise.all([
+        fetch("/api/questions").then(r=>{ if(!r.ok) throw new Error("questions failed"); return r.json(); }),
+        fetch("/api/questions/stats").then(r=>{ if(!r.ok) return []; return r.json(); }).catch(()=>[]),
+      ]);
+      questions = qs;
+      statsMap = {};
+      (st||[]).forEach(s=>{ statsMap[s.questionId]={attempted:s.attempted||0, submissions:s.submissions||0, solved:s.solved||0}; });
+      if(getToken()){
+        try{
+          const r1=await fetch("/api/questions/solved",{headers:authHeaders({})});
+          if(r1.ok){ (await r1.json()).forEach(id=>solvedSet.add(id)); }
+          const r2=await fetch("/api/submissions?limit=100",{headers:authHeaders({})});
+          if(r2.ok){ (await r2.json()).forEach(s=>{ if(!solvedSet.has(s.questionId)) attemptedSet.add(s.questionId); }); }
+        }catch{}
+      }
+      const tags=[...new Set(questions.flatMap(q=>q.tags||[]))].sort();
+      $("#tag-filter").innerHTML='<option value="all">All tags</option>'+tags.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
+    }
+    function filtered(){
+      let list=[...questions];
+      const search=$("#search-input").value.toLowerCase().trim();
+      const diff=$("#difficulty-filter").value;
+      const tag=$("#tag-filter").value;
+      const status=$("#status-filter").value;
+      const sort=$("#sort-select").value;
+      if(diff!=="all") list=list.filter(q=>q.difficulty===diff);
+      if(tag!=="all") list=list.filter(q=>(q.tags||[]).includes(tag));
+      if(search) list=list.filter(q=>q.title.toLowerCase().includes(search)||q.id.includes(search)||(q.tags||[]).join(" ").toLowerCase().includes(search));
+      if(status==="solved") list=list.filter(q=>solvedSet.has(q.id));
+      else if(status==="attempted") list=list.filter(q=>!solvedSet.has(q.id)&&attemptedSet.has(q.id));
+      else if(status==="todo") list=list.filter(q=>!solvedSet.has(q.id)&&!attemptedSet.has(q.id));
+      const st=id=>statsMap[id]||{attempted:0,submissions:0,solved:0};
+      const rate=q=>{ const s=st(q.id); return s.attempted? s.solved/s.attempted : -1; };
+      if(sort==="recent") list.sort((a,b)=>(b._createdAt||0)-(a._createdAt||0));
+      else if(sort==="title") list.sort((a,b)=>a.title.localeCompare(b.title));
+      else if(sort==="difficulty"){ const o={Easy:0,Medium:1,Hard:2}; list.sort((a,b)=>(o[a.difficulty]??9)-(o[b.difficulty]??9)||a.title.localeCompare(b.title)); }
+      else if(sort==="attempted") list.sort((a,b)=>st(b.id).attempted-st(a.id).attempted);
+      else if(sort==="solved") list.sort((a,b)=>st(b.id).solved-st(a.id).solved);
+      else if(sort==="rate") list.sort((a,b)=>rate(b)-rate(a));
+      return {list, st, rate};
+    }
+    function render(){
+      const {list, st, rate}=filtered();
+      const loading=$("#problems-loading"), table=$("#problems-table"), body=$("#problems-body"), empty=$("#problems-empty");
+      $("#problems-sub").textContent=`${list.length} of ${questions.length} problems`;
+      if(!list.length){ loading.classList.add("hidden"); table.classList.add("hidden"); empty.classList.remove("hidden"); return; }
+      loading.classList.add("hidden"); empty.classList.add("hidden"); table.classList.remove("hidden");
+      body.innerHTML=list.map((q,i)=>{
+        const s=st(q.id), r=rate(q);
+        const pct=r<0?0:Math.round(r*100);
+        const you=solvedSet.has(q.id)?'<span style="color:#00b8a3;font-weight:700">✓</span>':(attemptedSet.has(q.id)?'<span style="color:#ffa116;font-weight:700">●</span>':'<span style="color:var(--muted)">–</span>');
+        return `<tr>
+          <td style="color:var(--muted)">${i+1}</td>
+          <td class="lb-user"><a href="index.html#${esc(q.id)}">${esc(q.title)}</a><div style="color:var(--muted);font-size:11px;margin-top:2px">${(q.tags||[]).map(esc).join(" · ")}</div></td>
+          <td><span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span></td>
+          <td>${s.attempted} <span style="color:var(--muted);font-size:11px">(${s.submissions} tries)</span></td>
+          <td>${s.solved}</td>
+          <td><div style="display:flex;align-items:center;gap:6px"><div class="diff-bar" style="flex:1"><span style="width:${pct}%"></span></div><span style="font-size:12px;min-width:36px">${r<0?"–":pct+"%"}</span></div></td>
+          <td style="text-align:center">${you}</td>
+        </tr>`;
+      }).join("");
+    }
+    ["search-input","difficulty-filter","tag-filter","status-filter","sort-select"].forEach(id=>{
+      document.getElementById(id).addEventListener("input",render);
+      document.getElementById(id).addEventListener("change",render);
+    });
+    (async()=>{
+      updateTopbar();
+      const t=getToken();
+      if(t){
+        try{ const r=await fetch("/api/me",{headers:{Authorization:"Bearer "+t}}); if(!r.ok) clearAuth(); else { const u=await r.json(); localStorage.setItem("user",JSON.stringify(u)); updateTopbar(); } }catch{}
+      }
+      showLoader();
+      try{ await loadAll(); hideLoader(); render(); }
+      catch(e){ hideLoader(); $("#problems-loading").textContent="Error: "+e.message; }
+    })();
+  </script>
+</body>
+</html>
