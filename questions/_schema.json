@@ -8,6 +8,8 @@
     "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Slug, also filename. e.g. two-sum" },
     "title": { "type": "string" },
     "difficulty": { "type": "string", "enum": ["Easy", "Medium", "Hard"] },
+    "timeComplexity": { "type": "string", "description": "Expected optimal time, e.g. O(n)" },
+    "spaceComplexity": { "type": "string", "description": "Expected optimal space, e.g. O(1)" },
     "tags": { "type": "array", "items": { "type": "string" } },
     "problemStatement": { "type": "string", "description": "Supports plain text and inline HTML (<code>, <em>, <ul>)" },
     "constraints": { "type": "array", "items": { "type": "string" } },

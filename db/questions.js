@@ -14,10 +14,10 @@ async function migrateFromFiles(questionsDir) {
       const stat = fs.statSync(path.join(questionsDir, file));
       const createdAt = q.createdAt ? new Date(q.createdAt) : new Date(stat.mtimeMs);
       await pool.query(
-        `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,createdAt)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,timeComplexity,spaceComplexity,createdAt)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE title=VALUES(title), difficulty=VALUES(difficulty)`,
-        [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), createdAt]
+        [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt]
       );
     } catch (e) { console.warn('migrate skip', file, e.message); }
   }
@@ -34,6 +34,7 @@ async function dbLoadQuestions() {
       constraints: typeof r.constraints==='string' ? JSON.parse(r.constraints) : r.constraints || [],
       examples: typeof r.examples==='string' ? JSON.parse(r.examples) : r.examples || [],
       functionName: r.functionName, pythonFunctionName: r.pythonFunctionName, cppFunctionName: r.cppFunctionName,
+      timeComplexity: r.timeComplexity || null, spaceComplexity: r.spaceComplexity || null,
       params: typeof r.params==='string' ? JSON.parse(r.params) : r.params,
       starterCode: typeof r.starterCode==='string' ? JSON.parse(r.starterCode) : r.starterCode,
       visibleTestCases: typeof r.visibleTestCases==='string' ? JSON.parse(r.visibleTestCases) : r.visibleTestCases,
@@ -62,6 +63,7 @@ async function dbGetQuestion(id) {
     constraints: typeof r.constraints==='string' ? JSON.parse(r.constraints) : r.constraints || [],
     examples: typeof r.examples==='string' ? JSON.parse(r.examples) : r.examples || [],
     functionName: r.functionName, pythonFunctionName: r.pythonFunctionName, cppFunctionName: r.cppFunctionName,
+    timeComplexity: r.timeComplexity || null, spaceComplexity: r.spaceComplexity || null,
     params: typeof r.params==='string' ? JSON.parse(r.params) : r.params,
     starterCode: typeof r.starterCode==='string' ? JSON.parse(r.starterCode) : r.starterCode,
     visibleTestCases: typeof r.visibleTestCases==='string' ? JSON.parse(r.visibleTestCases) : r.visibleTestCases,
@@ -77,9 +79,9 @@ async function dbCreateQuestion(q, addedBy=null, addedByUsername=null) {
   const pool = getPool();
   const createdAt = q.createdAt ? new Date(q.createdAt) : new Date();
   await pool.query(
-    `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,createdAt,addedBy,addedByUsername)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), createdAt, addedBy, addedByUsername]
+    `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,timeComplexity,spaceComplexity,createdAt,addedBy,addedByUsername)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt, addedBy, addedByUsername]
   );
 }
 

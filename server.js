@@ -58,10 +58,87 @@ function lintCacheSet(key, diagnostics) {
     lintCache.set(key, { diagnostics, ts: Date.now() });
   } catch {}
 }
+// ---------- runtime stats helpers: best-effort per-case memory (null = n/a) ----------
+function jsHeapKb(before) {
+  try { return Math.max(0, Math.round((process.memoryUsage().heapUsed - before) / 1024)); }
+  catch { return null; }
+}
+// appended to python drivers: prints __PEAK_KB__<n> (Linux/macOS via resource); silent elsewhere
+const PY_PEAK_TAIL = `
+try:
+ import resource,sys
+ _dsa_pk=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+ if sys.platform=="darwin": _dsa_pk//=1024
+ print("__PEAK_KB__%d"%_dsa_pk)
+except Exception:
+ pass
+`;
+function pyPeakKb(stdout) {
+  const m = String(stdout || "").match(/__PEAK_KB__(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+function pyValueLines(stdout) {
+  return String(stdout || "").split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("__PEAK_KB__"));
+}
+function parsePySingle(stdout) {
+  const lines = pyValueLines(stdout);
+  if (!lines.length) throw new Error("empty python output");
+  return { actual: JSON.parse(lines[0]), memKb: pyPeakKb(stdout) };
+}
+let _hasTimeV = null;
+function hasTimeV() {
+  if (_hasTimeV === null) { try { _hasTimeV = fs.existsSync("/usr/bin/time"); } catch { _hasTimeV = false; } }
+  return _hasTimeV;
+}
+// run an exe, tracking peak RSS via /usr/bin/time -v when present (Linux); resolves {out, memKb}
+function runExeTracked(exe, args, env, timeoutMs, tmsg) {
+  return new Promise((resolve, reject) => {
+    const useTime = hasTimeV();
+    const child = useTime
+      ? spawn("/usr/bin/time", ["-v", exe, ...(args || [])], { env })
+      : spawn(exe, args || [], { env });
+    let out = "", err = "";
+    child.stdout.on("data", d => out += d);
+    child.stderr.on("data", d => err += d);
+    const killTimer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error(tmsg || "Time Limit Exceeded")); }, timeoutMs || 3500);
+    child.on("close", c => {
+      clearTimeout(killTimer);
+      if (c !== 0) return reject(new Error(err.trim() || `exit ${c}`));
+      let memKb = null;
+      if (useTime) {
+        const m = err.match(/Maximum resident set size \(kbytes\):\s*(\d+)/);
+        if (m) memKb = parseInt(m[1], 10);
+      }
+      resolve({ out, memKb });
+    });
+    child.on("error", e => { clearTimeout(killTimer); reject(new Error("Run error: " + e.message)); });
+  });
+}
 // ---------- AI generation guards: per-user rate limit + single flight ----------
 const genRate = new Map(); // userId -> lastAcceptedMs
 const GEN_MIN_GAP_MS = 30000;
 const genInflight = new Set(); // userIds with a generation running
+// ---------- complexity guards: per-IP rate limit + sha cache (mirrors lint) ----------
+const compRate = new Map(); // ip -> lastAcceptedMs
+const COMP_MIN_GAP_MS = 60000;
+const compCache = new Map(); // sha256(question+lang+code) -> { est, ts }
+const COMP_CACHE_TTL_MS = 3600 * 1000;
+const COMP_CACHE_MAX = 200;
+function compCacheGet(key) {
+  const e = compCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.ts > COMP_CACHE_TTL_MS) { try { compCache.delete(key); } catch {} return null; }
+  return e.est;
+}
+function compCacheSet(key, est) {
+  try {
+    if (!compCache.has(key) && compCache.size >= COMP_CACHE_MAX) {
+      const oldest = compCache.keys().next().value;
+      if (oldest !== undefined) compCache.delete(oldest);
+    }
+    compCache.set(key, { est, ts: Date.now() });
+  } catch {}
+}
 async function ensureDb() {
   if (!useDb || dbReady) return dbReady;
   try {
@@ -328,7 +405,7 @@ _ret = ${fnName}(${inputArgs})
 print(json.dumps(_ret))
 `;
     }
-    const fileContent = code + "\n" + driver;
+    const fileContent = code + "\n" + driver + PY_PEAK_TAIL;
     fs.writeFileSync(tmpFile, fileContent, "utf8");
     const py = spawn("python", [tmpFile], { timeout: 3000 });
     let stdout = "", stderr = "";
@@ -344,7 +421,7 @@ print(json.dumps(_ret))
         py3.on("close", (code2) => {
           try { fs.unlinkSync(tmpFile); } catch {}
           if (code2 !== 0) return reject(new Error(e2 || `python3 exit ${code2}`));
-          try { resolve(JSON.parse(s2.trim())); } catch(parseErr){ reject(new Error("Invalid python output: "+s2)) }
+          try { resolve(parsePySingle(s2)); } catch(parseErr){ reject(new Error("Invalid python output: "+s2)) }
         });
         py3.on("error", (e3)=> reject(new Error("python not found: install python3 and ensure 'python' or 'python3' in PATH")));
       } else {
@@ -357,8 +434,7 @@ print(json.dumps(_ret))
         return reject(new Error(stderr.trim() || `python exit ${code}`));
       }
       try {
-        const parsed = JSON.parse(stdout.trim());
-        resolve(parsed);
+        resolve(parsePySingle(stdout));
       } catch (e) {
         reject(new Error("Invalid python output: " + stdout + " err: " + e.message));
       }
@@ -486,35 +562,28 @@ int main(){
       if (err.code === "ENOENT") return reject(new Error("g++ not found. No bundled compiler at tools/w64devkit/bin/g++.exe and no system g++. Run setup-cpp.ps1 to bundle it (downloads portable w64devkit into project, no admin/PATH needed) OR install MinGW system-wide: https://code.visualstudio.com/docs/cpp/config-mingw"));
       reject(new Error("Compile spawn error: " + err.message));
     });
-    compile.on("close", cCode => {
+    compile.on("close", async cCode => {
       if (cCode !== 0) {
         try { fs.unlinkSync(tmpCpp); } catch {}
         return reject(new Error("Compile Error:\\n" + cErr));
       }
       const binDir = path.dirname(compiler);
       const runEnv = { ...process.env, PATH: binDir + path.delimiter + process.env.PATH };
-      const run = spawn(exe, [], { timeout: 3000, env: runEnv });
-      let out = "", rErr = "";
-      run.stdout.on("data", d => out += d);
-      run.stderr.on("data", d => rErr += d);
-      const killTimer = setTimeout(() => { try { run.kill(); } catch {}; reject(new Error("Time Limit Exceeded (C++ >3s)")); }, 3500);
-      run.on("close", rCode => {
-        clearTimeout(killTimer);
+      let tracked;
+      try {
+        tracked = await runExeTracked(exe, [], runEnv, 3000, "Time Limit Exceeded (C++ >3s)");
+      } catch (e) {
         try { fs.unlinkSync(tmpCpp); } catch {}
         try { fs.unlinkSync(exe); } catch {}
-        if (rCode !== 0) return reject(new Error(rErr.trim() || `Runtime exit ${rCode}: ${out}`));
-        const trimmed = out.trim();
-        try {
-          const parsed = JSON.parse(trimmed);
-          resolve(parsed);
-        } catch {
-          reject(new Error("Invalid C++ output (not JSON): " + trimmed));
-        }
-      });
-      run.on("error", e => {
-        clearTimeout(killTimer);
-        reject(new Error("Run error: " + e.message));
-      });
+        return reject(e);
+      }
+      try { fs.unlinkSync(tmpCpp); } catch {}
+      try { fs.unlinkSync(exe); } catch {}
+      try {
+        resolve({ actual: JSON.parse(tracked.out.trim()), memKb: tracked.memKb });
+      } catch {
+        reject(new Error("Invalid C++ output (not JSON): " + tracked.out.trim()));
+      }
     });
   });
 }
@@ -571,7 +640,7 @@ for tc in cases:
     print(json.dumps(_ret))
 `;
   }
-  const fileContent = code + "\n" + driver;
+  const fileContent = code + "\n" + driver + PY_PEAK_TAIL;
   fs.writeFileSync(tmpFile, fileContent, "utf8");
   return new Promise((resolve, reject) => {
     const py = spawn("python", [tmpFile], { timeout: 8000 });
@@ -582,15 +651,14 @@ for tc in cases:
       if (err.code === "ENOENT") {
         const py3 = spawn("python3", [tmpFile], { timeout: 8000 });
         let s2="", e2=""; py3.stdout.on("data", d=>s2+=d); py3.stderr.on("data", d=>e2+=d);
-        py3.on("close", code2 => { try{fs.unlinkSync(tmpFile);}catch{}; if(code2!==0) return reject(new Error(e2||`python3 exit ${code2}`)); const lines=s2.trim().split("\n").filter(Boolean); try{ resolve(lines.map(l=>JSON.parse(l))); }catch{ reject(new Error("Invalid python batch output: "+s2)) }});
+        py3.on("close", code2 => { try{fs.unlinkSync(tmpFile);}catch{}; if(code2!==0) return reject(new Error(e2||`python3 exit ${code2}`)); try{ resolve({ actuals: pyValueLines(s2).map(l=>JSON.parse(l)), memKb: pyPeakKb(s2) }); }catch{ reject(new Error("Invalid python batch output: "+s2)) }});
         py3.on("error", ()=> reject(new Error("python not found")));
       } else reject(err);
     });
     py.on("close", code => {
       try { fs.unlinkSync(tmpFile); } catch {}
       if (code!==0) return reject(new Error(stderr.trim()||`python exit ${code}`));
-      const lines = stdout.trim().split("\n").filter(Boolean);
-      try { resolve(lines.map(l=>JSON.parse(l))); } catch(e){ reject(new Error("Invalid python batch output: "+stdout)) }
+      try { resolve({ actuals: pyValueLines(stdout).map(l=>JSON.parse(l)), memKb: pyPeakKb(stdout) }); } catch(e){ reject(new Error("Invalid python batch output: "+stdout)) }
     });
     setTimeout(()=>{ try{py.kill();}catch{}; reject(new Error("Time Limit Exceeded (python >8s)")); },8500);
   });
@@ -671,15 +739,14 @@ int main(){
     const compile = spawn(compiler, ["-std=c++17","-O0",tmpCpp,"-o",exe]);
     let cErr=""; compile.stderr.on("data",d=>cErr+=d);
     compile.on("error", err=>{ try{fs.unlinkSync(tmpCpp);}catch{}; if(err.code==="ENOENT") return reject(new Error("g++ not found")); reject(new Error("Compile spawn error: "+err.message)); });
-    compile.on("close", cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
+    compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
       const binDir=path.dirname(compiler); const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
-      const run=spawn(exe, [], {timeout:8000, env: runEnv});
-      let out="", rErr=""; run.stdout.on("data",d=>out+=d); run.stderr.on("data",d=>rErr+=d);
-      const killTimer=setTimeout(()=>{try{run.kill();}catch{}; reject(new Error("Time Limit Exceeded (C++ >8s)"));},8500);
-      run.on("close", rCode=>{ clearTimeout(killTimer); try{fs.unlinkSync(tmpCpp);}catch{}; try{fs.unlinkSync(exe);}catch{}; if(rCode!==0) return reject(new Error(rErr.trim()||`Runtime exit ${rCode}: ${out}`)); const lines=out.trim().split("\n").filter(Boolean); try{ resolve(lines.map(l=>JSON.parse(l))); }catch{ reject(new Error("Invalid C++ batch output (not JSON): "+out.trim())) } });
-      run.on("error", e=>{ clearTimeout(killTimer); reject(new Error("Run error: "+e.message)); });
+      let tracked;
+      try { tracked = await runExeTracked(exe, [], runEnv, 8000, "Time Limit Exceeded (C++ >8s)"); }
+      catch(e){ try{fs.unlinkSync(tmpCpp);}catch{} try{fs.unlinkSync(exe);}catch{} return reject(e); }
+      try{fs.unlinkSync(tmpCpp);}catch{} try{fs.unlinkSync(exe);}catch{};
+      try{ resolve({ actuals: tracked.out.trim().split("\n").filter(Boolean).map(l=>JSON.parse(l)), memKb: tracked.memKb }); }catch{ reject(new Error("Invalid C++ batch output (not JSON): "+tracked.out.trim())) } });
     });
-  });
 }
 
 async function executeQuestion(question, code, language) {
@@ -690,48 +757,50 @@ async function executeQuestion(question, code, language) {
   if (language === "cpp" && testCases.length > 1) {
     const startAll = Date.now();
     try {
-      const actuals = await runCppBatch(code, question, testCases);
+      const { actuals, memKb } = await runCppBatch(code, question, testCases);
       for (let i=0;i<testCases.length;i++) {
         const tc=testCases[i];
         const actual=actuals[i];
         const ok=deepEqual(actual, tc.expectedOutput, question.id);
         if(ok) passed++;
-        results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length)});
+        results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length), memKb});
       }
     } catch (e) {
       const msg=e.message;
-      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0});
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
     }
     return { total: testCases.length, passed, results };
   }
   if (language === "python" && testCases.length > 1) {
     const startAll = Date.now();
     try {
-      const actuals = await runPythonBatch(code, question, testCases);
+      const { actuals, memKb } = await runPythonBatch(code, question, testCases);
       for (let i=0;i<testCases.length;i++) {
         const tc=testCases[i];
         const actual=actuals[i];
         const ok=deepEqual(actual, tc.expectedOutput, question.id);
         if(ok) passed++;
-        results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length)});
+        results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length), memKb});
       }
     } catch (e) {
       const msg=e.message;
-      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0});
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
     }
     return { total: testCases.length, passed, results };
   }
   for (const tc of testCases) {
     const start = Date.now();
-    let actual, error = null;
+    let actual, error = null, memKb = null;
     let ok = false;
     try {
       if (language === "javascript") {
+        const hb = process.memoryUsage().heapUsed;
         actual = runJS(code, question, tc.input, tc.expectedOutput);
+        memKb = jsHeapKb(hb);
       } else if (language === "python") {
-        actual = await runPython(code, question, tc.input, tc.expectedOutput);
+        ({ actual, memKb } = await runPython(code, question, tc.input, tc.expectedOutput));
       } else if (language === "cpp") {
-        actual = await runCpp(code, question, tc.input, tc.expectedOutput);
+        ({ actual, memKb } = await runCpp(code, question, tc.input, tc.expectedOutput));
       } else {
         throw new Error(`Unsupported language: ${language}`);
       }
@@ -749,7 +818,8 @@ async function executeQuestion(question, code, language) {
       actual: error ? null : actual,
       error,
       hidden: !!tc._hidden,
-      timeMs: Date.now() - start
+      timeMs: Date.now() - start,
+      memKb
     });
   }
   return { total: testCases.length, passed, results };
@@ -1105,6 +1175,8 @@ const server = http.createServer(async (req, res) => {
             tags: [...new Set(tagSet)],
             problemStatement: draft.problemStatement,
             constraints: Array.isArray(draft.constraints) ? draft.constraints : [],
+            timeComplexity: draft.timeComplexity || undefined,
+            spaceComplexity: draft.spaceComplexity || undefined,
             examples: draft.examples,
             functionName: draft.functionName,
             pythonFunctionName: draft.pythonFunctionName || undefined,
@@ -1118,6 +1190,8 @@ const server = http.createServer(async (req, res) => {
           };
           if (!q.pythonFunctionName) delete q.pythonFunctionName;
           if (!q.cppFunctionName) delete q.cppFunctionName;
+          if (!q.timeComplexity) delete q.timeComplexity;
+          if (!q.spaceComplexity) delete q.spaceComplexity;
           const errs = validateQuestionPayload(q);
           if (errs.length) return sendJson(res, { error: "Generated question invalid: " + errs.join("; ") }, 502);
           await persistQuestion(q, u);
@@ -1132,6 +1206,51 @@ const server = http.createServer(async (req, res) => {
         if (e && e.status) return sendJson(res, { error: e.message }, e.status);
         console.error("generate failed:", e);
         return sendJson(res, { error: "Generation failed: " + e.message }, 500);
+      }
+    });
+    return;
+  }
+
+  // AI complexity estimation (Big-O of submitted code; failures are non-fatal to UI)
+  if (pathname === "/api/complexity" && req.method === "POST") {
+    tryAuthenticate(req);
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        let parsed = {};
+        try { parsed = JSON.parse(body || "{}"); }
+        catch { return sendJson(res, { error: "Invalid JSON body" }, 400); }
+        const { questionId, language, code } = parsed;
+        if (!questionId || !language || code === undefined) return sendJson(res, { error: "Missing fields: questionId, language, code" }, 400);
+        if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
+        if (code.length > 50000) return sendJson(res, { error: "Code too large" }, 400);
+        if (!process.env.GROQ_API_KEY) return sendJson(res, { error: "AI complexity not configured" }, 503);
+        const ip = (req.socket && req.socket.remoteAddress) || "anon";
+        const now = Date.now();
+        const key = crypto.createHash("sha256").update(questionId + "\0" + language + "\0" + code).digest("hex");
+        const hit = compCacheGet(key);
+        if (hit) {
+          const qh = await getQuestionById(questionId);
+          return sendJson(res, { ...hit, expectedTime: (qh && qh.timeComplexity) || null, expectedSpace: (qh && qh.spaceComplexity) || null, cached: true }, 200);
+        }
+        const last = compRate.get(ip) || 0;
+        if (now - last < COMP_MIN_GAP_MS) return sendJson(res, { error: "Rate limited: try again shortly" }, 429);
+        compRate.set(ip, now);
+        const q = await getQuestionById(questionId);
+        if (!q) return sendJson(res, { error: "Question not found" }, 404);
+        const { groqChat, extractJson, buildComplexityPrompt, isBigO } = require("./server/utils/groq");
+        const { content } = await groqChat(buildComplexityPrompt(q.title, language, code), "openai/gpt-oss-20b");
+        let est;
+        try { est = extractJson(content); }
+        catch { return sendJson(res, { error: "Model returned invalid JSON" }, 502); }
+        if (!est || !isBigO(est.time) || !isBigO(est.space)) return sendJson(res, { error: "Model returned invalid complexity" }, 502);
+        const out = { time: est.time.trim(), space: est.space.trim(), note: String(est.note || "").slice(0, 300) };
+        compCacheSet(key, out);
+        return sendJson(res, { ...out, expectedTime: q.timeComplexity || null, expectedSpace: q.spaceComplexity || null }, 200);
+      } catch (e) {
+        if (e && e.status) return sendJson(res, { error: e.message }, e.status);
+        return sendJson(res, { error: "Complexity failed: " + e.message }, 500);
       }
     });
     return;
@@ -1251,19 +1370,19 @@ const server = http.createServer(async (req, res) => {
         // Use batch for cpp/python but stream per case after batch returns? For true streaming, run per-case and flush each.
         // For JS, per-case is already fast. For cpp/python batch, we still get all at once, so we simulate streaming by iterating after batch.
         // To keep streaming granular, we run per-case sequentially and flush each.
-        let passed=0;
-        const sendOne = (tc, actual, error, timeMs) => {
+        let passed=0, streamMemKb=null;
+        const sendOne = (tc, actual, error, timeMs, memKb) => {
           const ok = !error && deepEqual(actual, tc.expectedOutput, q.id);
           if(ok) passed++;
-          const payload = { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs };
+          const payload = { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs, memKb: memKb==null?null:memKb };
           res.write(`data: ${JSON.stringify(payload)}\n\n`);
           return ok;
         };
         if (language==="javascript") {
           for(const tc of testCases){
-            const start=Date.now(); let actual, err=null;
-            try{ actual=runJS(code,q,tc.input,tc.expectedOutput); }catch(e){ err=e.message; if(String(e.message).includes("Script execution timed out")) err="Time Limit Exceeded (JS >2s)"; }
-            sendOne(tc, actual, err, Date.now()-start);
+            const start=Date.now(); let actual, err=null, memKb=null;
+            try{ const hb=process.memoryUsage().heapUsed; actual=runJS(code,q,tc.input,tc.expectedOutput); memKb=jsHeapKb(hb); if(memKb!=null) streamMemKb=Math.max(streamMemKb||0,memKb); }catch(e){ err=e.message; if(String(e.message).includes("Script execution timed out")) err="Time Limit Exceeded (JS >2s)"; }
+            sendOne(tc, actual, err, Date.now()-start, memKb);
           }
         } else if (language==="python") {
           // Stream Python per-case with flush for true streaming
@@ -1277,18 +1396,18 @@ const server = http.createServer(async (req, res) => {
             if(isComposite) driver = `\nimport json,sys\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    inp={k: list(v) if isinstance(v,list) else v for k,v in tc["input"].items()}\n    _ret=${fnName}(**inp)\n    print(json.dumps({"k":_ret,"${q.params[0]}": inp["${q.params[0]}"]}), flush=True)\n`;
             else if(isReverse) driver = `\nimport json\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    inp={k: list(v) if isinstance(v,list) else v for k,v in tc["input"].items()}\n    _ret=${fnName}(**inp)\n    if _ret is None: _ret=inp["${q.params[0]}"]\n    print(json.dumps(_ret), flush=True)\n`;
             else driver = `\nimport json\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    _ret=${fnName}(**tc["input"])\n    print(json.dumps(_ret), flush=True)\n`;
-            fs.writeFileSync(tmpFile, code+"\n"+driver, "utf8");
+            fs.writeFileSync(tmpFile, code+"\n"+driver+PY_PEAK_TAIL, "utf8");
             const py = spawn("python", [tmpFile]);
             let stderr=""; py.stderr.on("data",d=>stderr+=d);
-            py.on("error", async()=>{ try{ const py3=spawn("python3",[tmpFile]); let out=""; py3.stdout.on("data",d=>{ const lines=d.toString().split("\n").filter(Boolean); for(const line of lines){ try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0); }catch{} } }); py3.on("close",c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(c!==0) for(const tc of testCases) sendOne(tc,null,"python3 error "+c,0); }); }catch{} });
+            py.on("error", async()=>{ try{ const py3=spawn("python3",[tmpFile]); let out=""; py3.stdout.on("data",d=>{ const lines=d.toString().split("\n").filter(Boolean); for(const line of lines){ const t=line.trim(); if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); continue; } try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch{} } }); py3.on("close",c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(c!==0) for(const tc of testCases) sendOne(tc,null,"python3 error "+c,0,null); }); }catch{} });
             let outBuf=""; py.stdout.on("data", d=>{
               outBuf+=d.toString();
               let lines=outBuf.split("\n");
               outBuf=lines.pop();
-              for(const line of lines){ if(!line.trim()) continue; try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0); }catch(e){} }
+              for(const line of lines){ const t=line.trim(); if(!t) continue; if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); continue; } try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch(e){} }
             });
-            await new Promise((res,rej)=>{ py.on("close", c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(outBuf.trim()){ try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0); }catch{} } if(c!==0 && c!==null) { /* already handled */ } res(); }); py.on("error", rej); });
-          }catch(e){ for(const tc of testCases) sendOne(tc, null, e.message, 0); }
+            await new Promise((res,rej)=>{ py.on("close", c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(outBuf.trim()){ const t=outBuf.trim(); if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); } else { try{ const actual=JSON.parse(t); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch{} } } if(c!==0 && c!==null) { /* already handled */ } res(); }); py.on("error", rej); });
+          }catch(e){ for(const tc of testCases) sendOne(tc, null, e.message, 0, null); }
         } else if (language==="cpp") {
           // Compile once, then stream each case as exe prints (endl flushes)
           try{
@@ -1340,7 +1459,8 @@ const server = http.createServer(async (req, res) => {
             }
             const binDir=path.dirname(compiler);
             const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
-            const run=spawn(exe, [], {env: runEnv});
+            const useTime=hasTimeV();
+            const run=useTime?spawn("/usr/bin/time",["-v",exe],{env: runEnv}):spawn(exe, [], {env: runEnv});
             let outBuf="", rErr="";
             let idx=0;
             const t0=Date.now();
@@ -1353,7 +1473,7 @@ const server = http.createServer(async (req, res) => {
                 try{
                   const actual=JSON.parse(line);
                   const tc=testCases[idx++];
-                  if(tc) sendOne(tc, actual, null, Date.now()-t0);
+                  if(tc) sendOne(tc, actual, null, Date.now()-t0, null);
                 }catch{}
               }
             });
@@ -1362,23 +1482,24 @@ const server = http.createServer(async (req, res) => {
               const kill=setTimeout(()=>{try{run.kill();}catch{}; rej(new Error("Time Limit Exceeded"));},8000);
               run.on("close",c=>{
                 clearTimeout(kill);
+                if(useTime){ const m=rErr.match(/Maximum resident set size \(kbytes\):\s*(\d+)/); if(m) streamMemKb=Math.max(streamMemKb||0,parseInt(m[1],10)); }
                 if(outBuf.trim() && idx<testCases.length){
-                  try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases[idx++]; if(tc) sendOne(tc, actual, null, Date.now()-t0); }catch{}
+                  try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases[idx++]; if(tc) sendOne(tc, actual, null, Date.now()-t0, null); }catch{}
                 }
                 // keep cached exe for reruns (do NOT delete)
                 if(c!==0 && idx<testCases.length){
                   // remaining cases failed
-                  for(let j=idx;j<testCases.length;j++) sendOne(testCases[j], null, rErr||`exit ${c}`, 0);
+                  for(let j=idx;j<testCases.length;j++) sendOne(testCases[j], null, rErr||`exit ${c}`, 0, null);
                 }
                 res();
               });
               run.on("error",rej);
             });
           }catch(e){
-            for(const tc of testCases) sendOne(tc, null, e.message, 0);
+            for(const tc of testCases) sendOne(tc, null, e.message, 0, null);
           }
         }
-        res.write(`event: done\ndata: ${JSON.stringify({passed, total:testCases.length})}\n\n`);
+        res.write(`event: done\ndata: ${JSON.stringify({passed, total:testCases.length, memKb: streamMemKb})}\n\n`);
         res.end();
       } catch(e){ try{ res.writeHead(500, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:e.message})); }catch{} }
     });
@@ -1401,10 +1522,10 @@ const server = http.createServer(async (req, res) => {
         const tc = all[index];
         if (!tc) return sendJson(res, { error: "bad index" }, 400);
         const start = Date.now();
-        let actual=null, error=null, ok=false;
+        let actual=null, error=null, ok=false, memKb=null;
         try{
-          if(language==="javascript") actual=runJS(code,q,tc.input,tc.expectedOutput);
-          else if(language==="python") actual=await runPython(code,q,tc.input,tc.expectedOutput);
+          if(language==="javascript"){ const hb=process.memoryUsage().heapUsed; actual=runJS(code,q,tc.input,tc.expectedOutput); memKb=jsHeapKb(hb); }
+          else if(language==="python") ({ actual, memKb } = await runPython(code,q,tc.input,tc.expectedOutput));
           else if(language==="cpp"){
             // reuse cached batch exe with index arg (compile once, run single)
             const crypto=require("crypto");
@@ -1440,18 +1561,13 @@ const server = http.createServer(async (req, res) => {
             // find actual compiler dir for DLLs
             let cdir="C:\\mingw64\\bin"; try{ if(!fs.existsSync(exe)) throw 0; }catch{}
             const runEnv={...process.env, PATH: cdir+path.delimiter+process.env.PATH};
-            const out=await new Promise((rs,rj)=>{
-              const r=spawn(exe,[String(index)],{env:runEnv});
-              let o="",e=""; r.stdout.on("data",d=>o+=d); r.stderr.on("data",d=>e+=d);
-              const t=setTimeout(()=>{try{r.kill();}catch{}; rj(new Error("Time Limit Exceeded"));},3000);
-              r.on("close",c=>{clearTimeout(t); if(c!==0) return rj(new Error(e||`exit ${c}`)); try{rs(JSON.parse(o.trim().split("\n")[0]));}catch{ rj(new Error("Invalid output: "+o)); }});
-              r.on("error",rj);
-            });
-            actual=out;
+            const tracked=await runExeTracked(exe,[String(index)],runEnv,3000,"Time Limit Exceeded");
+            try{ actual=JSON.parse(tracked.out.trim().split("\n")[0]); }catch{ throw new Error("Invalid output: "+tracked.out); }
+            memKb=tracked.memKb;
           } else throw new Error("bad lang");
           ok=deepEqual(actual, tc.expectedOutput, q.id);
         }catch(e){ error=e.message; if(String(e.message).includes("Script execution timed out")) error="Time Limit Exceeded (JS >2s)"; }
-        return sendJson(res, { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs: Date.now()-start, index }, 200);
+        return sendJson(res, { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs: Date.now()-start, memKb, index }, 200);
       }catch(e){ return sendJson(res, { error: e.message }, 500); }
     });
     return;

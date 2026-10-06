@@ -111,6 +111,18 @@ function extractJson(text) {
   throw new Error("Model JSON was truncated — try again");
 }
 
+function buildComplexityPrompt(title, language, code) {
+  return [
+    { role: "system", content: "You analyze code complexity. Respond with ONLY a single JSON object — no prose, no fences." },
+    {
+      role: "user",
+      content: `Analyze the time and space complexity of this ${language} solution for "${title}":\n${String(code).slice(0, 6000)}\nReturn {"time":"O(?)","space":"O(?)","note":"one short sentence"}. Use standard Big-O like O(1), O(log n), O(n), O(n log n), O(n^2).`,
+    },
+  ];
+}
+
+function isBigO(s) { return typeof s === "string" && /^O\(.+\)$/.test(s.trim()); }
+
 function buildGenerationPrompt(topic, difficulty, extraTags) {
   const tagHint = Array.isArray(extraTags) && extraTags.length
     ? ` Include these tags verbatim in "tags": ${JSON.stringify(extraTags)}.`
@@ -124,7 +136,7 @@ function buildGenerationPrompt(topic, difficulty, extraTags) {
       role: "user",
       content:
 `Write one ${difficulty} LeetCode-style question about: ${topic}.${tagHint}
-JSON keys (exactly): id (kebab-case slug), title, difficulty ("${difficulty}"), tags, problemStatement (plain text, >=40 chars, <code> allowed), constraints (non-empty string array), examples (>0, [{input:"human-readable, e.g. nums = [2,7], target = 9", output:"[0,1]", explanation}]), functionName (camelCase JS), pythonFunctionName (snake_case), cppFunctionName (usually same as functionName), params (non-empty unique string array), starterCode ({javascript:"function F(...) {\\n}", python:"def f(...):\\n    pass", cpp: full skeleton, see below}), testInputsVisible (2-4x {id,input}), testInputsHidden (3-6x {id,input}, include edge cases: empty, single, duplicates, extremes), referenceSolution (JS string defining functionName, must RETURN the answer, no console.log).
+JSON keys (exactly): id (kebab-case slug), title, difficulty ("${difficulty}"), tags, problemStatement (plain text, >=40 chars, <code> allowed), constraints (non-empty string array), timeComplexity (expected optimal, e.g. "O(n)"), spaceComplexity (expected optimal, e.g. "O(1)"), examples (>0, [{input:"human-readable, e.g. nums = [2,7], target = 9", output:"[0,1]", explanation}]), functionName (camelCase JS), pythonFunctionName (snake_case), cppFunctionName (usually same as functionName), params (non-empty unique string array), starterCode ({javascript:"function F(...) {\\n}", python:"def f(...):\\n    pass", cpp: full skeleton, see below}), testInputsVisible (2-4x {id,input}), testInputsHidden (3-6x {id,input}, include edge cases: empty, single, duplicates, extremes), referenceSolution (JS string defining functionName, must RETURN the answer, no console.log).
 C++ skeleton (REQUIRED, infer types from example values: integer->int, float->double, true/false->bool, text->string, [1,2]->vector<int>, ["a"]->vector<string>, single chars->vector<char>): "#include <bits/stdc++.h>\\nusing namespace std;\\n\\n<Ret> <cppFunctionName>(<T1> <p1>, ...) {\\n    // write code here\\n    \\n}" where <Ret> matches what the reference returns (vector<int>, int, bool, string; void only for in-place + mutate first param).
 Rules: every test input must contain every param as JSON values (each input JSON <=2000 chars, no duplicate inputs). Keep inputs runnable in <1s. Do NOT include expectedOutputs — the server computes them.`,
     },
@@ -153,6 +165,9 @@ function validateDraft(draft, difficulty) {
   if (sc.cpp && !sc.cpp.includes("bits")) errs.push("starterCode.cpp must include <bits/stdc++.h>");
   if (draft.cppFunctionName && !ident.test(draft.cppFunctionName)) errs.push("cppFunctionName must be a valid identifier");
   if (!Array.isArray(draft.constraints) || draft.constraints.length === 0) errs.push("constraints must be a non-empty array");
+  for (const k of ["timeComplexity", "spaceComplexity"]) {
+    if (draft[k] !== undefined && !isBigO(draft[k])) errs.push(`${k} must look like O(n)`);
+  }
   if (!Array.isArray(draft.examples) || draft.examples.length === 0) errs.push("examples must be a non-empty array");
   else for (const ex of draft.examples) {
     if (!ex || ex.input === undefined || ex.output === undefined) { errs.push("every example needs input and output"); break; }
@@ -186,4 +201,4 @@ function validateDraft(draft, difficulty) {
   return errs;
 }
 
-module.exports = { groqChat, extractJson, buildGenerationPrompt, validateDraft, ALLOWED_MODELS, DEFAULT_MODEL };
+module.exports = { groqChat, extractJson, buildGenerationPrompt, buildComplexityPrompt, isBigO, validateDraft, ALLOWED_MODELS, DEFAULT_MODEL };

@@ -53,7 +53,8 @@ See `questions/_schema.json` for full schema. Minimal example:
 ## API
 - `GET /api/questions` → summaries
 - `GET /api/questions/:id` → full question
-- `POST /api/execute` `{questionId, code, language: "javascript"|"python", mode: "run"|"submit"}` → `{mode, total, passed, results: [{testCaseId, passed, input, expected, actual, error, hidden, timeMs}]}`
+- `POST /api/execute` `{questionId, code, language: "javascript"|"python", mode: "run"|"submit"}` → `{mode, total, passed, results: [{testCaseId, passed, input, expected, actual, error, hidden, timeMs, memKb}]}` (`memKb` = best-effort peak KB: JS heap delta, Python `resource`/tracemalloc marker, C++ `/usr/bin/time -v` on Linux, `null` = n/a)
+- `POST /api/complexity` `{questionId, language, code}` → `{time, space, note, expectedTime, expectedSpace}` (Groq-estimated Big-O of your code vs question's expected optimal; sha-cached, failures non-fatal)
 
 ## Tests
 - JS: `vm` with 2s timeout; Python: `python`/`python3` spawn with 3s timeout.

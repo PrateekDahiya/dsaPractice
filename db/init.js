@@ -120,6 +120,8 @@ async function initDb() {
       FOREIGN KEY (questionId) REFERENCES questions(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+  try { await pool.query(`ALTER TABLE questions ADD COLUMN timeComplexity VARCHAR(50) NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE questions ADD COLUMN spaceComplexity VARCHAR(50) NULL`); } catch {}
   try {
     const { seedMethodDocs } = require('./methods');
     await seedMethodDocs();
