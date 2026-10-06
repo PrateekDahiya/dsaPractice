@@ -237,4 +237,57 @@ async function getQuestionStats() {
   }
 }
 
-module.exports = { toISODate, buildEmptyCalendar, getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, clearStatsCache };
+async function getQuestionPerf(questionId, userId) {
+  // Community + personal aggregates for one question (powers the Performance tab).
+  const pool = getPool();
+  const [[agg]] = await pool.query(
+    `SELECT COUNT(*) AS submissions,
+       COUNT(DISTINCT userId) AS attempted,
+       COUNT(DISTINCT CASE WHEN passed=total AND mode='submit' THEN userId END) AS submittersSolved,
+       AVG(avgTimeMs) AS avgTimeMs, MAX(maxTimeMs) AS maxTimeMs, MAX(maxMemKb) AS maxMemKb
+     FROM submissions WHERE questionId=?`, [questionId]);
+  let manualSolved = 0;
+  try {
+    const [[m]] = await pool.query('SELECT COUNT(DISTINCT userId) AS c FROM manual_solved WHERE questionId=?', [questionId]);
+    manualSolved = Number(m.c) || 0;
+  } catch {}
+  let mine = null;
+  if (userId != null) {
+    const [[me]] = await pool.query(
+      `SELECT COUNT(*) AS subs,
+         SUM(passed=total AND mode='submit') AS solves,
+         MIN(avgTimeMs) AS bestAvgMs, MAX(maxMemKb) AS maxMemKb
+       FROM submissions WHERE questionId=? AND userId=?`, [questionId, userId]);
+    const [recentRows] = await pool.query(
+      `SELECT id, mode, language, passed, total, avgTimeMs, maxTimeMs, maxMemKb, complexityTime, complexitySpace, createdAt
+       FROM submissions WHERE questionId=? AND userId=? ORDER BY createdAt DESC LIMIT 5`, [questionId, userId]);
+    mine = {
+      submissions: Number(me.subs) || 0,
+      solves: Number(me.solves) || 0,
+      bestAvgMs: me.bestAvgMs == null ? null : Number(me.bestAvgMs),
+      maxMemKb: me.maxMemKb == null ? null : Number(me.maxMemKb),
+      recent: recentRows.map(r => ({
+        id: r.id, mode: r.mode, language: r.language, passed: r.passed, total: r.total,
+        avgTimeMs: r.avgTimeMs ?? null, maxTimeMs: r.maxTimeMs ?? null, maxMemKb: r.maxMemKb ?? null,
+        complexityTime: r.complexityTime || null, complexitySpace: r.complexitySpace || null,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      })),
+    };
+  }
+  const attempted = Number(agg.attempted) || 0;
+  const solved = Math.max(Number(agg.submittersSolved) || 0, manualSolved);
+  return {
+    overall: {
+      submissions: Number(agg.submissions) || 0,
+      attempted,
+      solved,
+      solveRate: attempted ? Math.round(solved / attempted * 100) : null,
+      avgTimeMs: agg.avgTimeMs == null ? null : Math.round(Number(agg.avgTimeMs)),
+      maxTimeMs: agg.maxTimeMs == null ? null : Number(agg.maxTimeMs),
+      maxMemKb: agg.maxMemKb == null ? null : Number(agg.maxMemKb),
+    },
+    mine,
+  };
+}
+
+module.exports = { toISODate, buildEmptyCalendar, getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, getQuestionPerf, clearStatsCache };

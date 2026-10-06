@@ -1039,6 +1039,27 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, rows, 200);
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
   }
+  // Per-question performance: community + personal aggregates (powers the Performance tab)
+  if (pathname.match(/^\/api\/questions\/[^/]+\/perf$/) && req.method === "GET") {
+    const parts = pathname.split("/").filter(Boolean);
+    const qid = decodeURIComponent(parts[2]);
+    try {
+      tryAuthenticate(req);
+      const userId = req.user ? req.user.id : null;
+      await ensureDb();
+      if (!dbReady || !db.getQuestionPerf) return sendJson(res, { error: "DB not ready" }, 500);
+      const q = await getQuestionById(qid);
+      if (!q) return sendJson(res, { error: "Question not found" }, 404);
+      const perf = await db.getQuestionPerf(qid, userId);
+      return sendJson(res, {
+        questionId: qid,
+        expectedTime: q.timeComplexity || null,
+        expectedSpace: q.spaceComplexity || null,
+        overall: perf.overall,
+        mine: perf.mine,
+      }, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname.startsWith("/api/questions/") && req.method === "GET") {
     const id = decodeURIComponent(pathname.slice("/api/questions/".length));
     const q = await getQuestionById(id);

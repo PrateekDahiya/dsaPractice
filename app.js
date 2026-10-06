@@ -343,6 +343,7 @@ async function loadQuestion(id) {
     if(statusText) statusText.textContent = `Loaded: ${q.title}`;
     history.replaceState(null, "", `#${id}`);
     renderHistory();
+    if(isPerfActive()) renderPerformance();
     hideLoader();
   } catch (e) {
     console.error(e);
@@ -672,7 +673,61 @@ async function requestComplexity(question, code, lang){
     if(sid){
       try{ await apiFetch(`/api/submissions/${sid}/complexity`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({time:d.time,space:d.space})}); }catch{}
     }
-  }catch(e){ line.textContent="Complexity unavailable ("+e.message+")"; }
+    if(isPerfActive()) renderPerformance();
+  }catch(e){ line.textContent="Complexity unavailable ("+e.message+")"; if(isPerfActive()) renderPerformance(); }
+}
+function isPerfActive(){ const p=document.getElementById("ptab-perf"); return p&&p.classList.contains("active"); }
+async function renderPerformance(){
+  const view=document.getElementById("perf-view");
+  if(!view) return;
+  const q=currentQuestion;
+  if(!q){ view.innerHTML=`<div class="empty-state"><h2>Performance</h2><p>Select a problem first.</p></div>`; return; }
+  const run=(window.__lastRun&&window.__lastRun.questionId===q.id)?window.__lastRun:null;
+  let runHtml;
+  if(!run){
+    runHtml=`<div style="color:var(--muted);font-size:13px;margin-bottom:12px">No run yet for <strong>${esc(q.title)}</strong> — hit Run or Submit.</div>`;
+  } else {
+    const times=run.results.map(r=>r.timeMs||0);
+    const mx=Math.max(1,...times);
+    const rows=run.results.map((r,i)=>{
+      const pct=Math.round((r.timeMs||0)/mx*100);
+      return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0"><span style="min-width:64px;color:var(--muted)">Case ${i+1}${r.hidden?" (h)":""}</span><div class="diff-bar" style="flex:1"><span style="width:${pct}%"></span></div><span style="min-width:120px;text-align:right">${r.timeMs??0}ms${fmtMem(r.memKb)}</span></div>`;
+    }).join("");
+    const cx=window.__lastComplexity;
+    const cxLine=run.mode==="submit"
+      ?(cx?`Complexity (AI): yours <strong>${esc(cx.time)} / ${esc(cx.space)}</strong>`:`Complexity: estimating… (submit triggers analysis)`)
+      :`Complexity: estimated on Submit`;
+    const exp=(q.timeComplexity||q.spaceComplexity)?` · expected ${esc(q.timeComplexity||"?")} / ${esc(q.spaceComplexity||"?")}`:"";
+    runHtml=`<h3 style="font-size:14px;margin:0 0 6px">This ${esc(run.mode)} — ${run.passed}/${run.total} passed</h3>${runStatsHtml(run.results)}${rows}<div style="font-size:12px;color:var(--muted);margin:8px 0 12px">${cxLine}${exp}</div>`;
+  }
+  view.innerHTML=`<h2 style="font-size:16px;margin:0 0 4px">Performance — ${esc(q.title)}</h2><div style="color:var(--muted);font-size:12px;margin-bottom:10px">${esc(q.difficulty)} · ${(q.tags||[]).join(" · ")}</div>${runHtml}<div id="perf-problem" style="color:var(--muted);font-size:13px">Loading problem stats…</div>`;
+  try{
+    const r=await apiFetch(`/api/questions/${encodeURIComponent(q.id)}/perf`);
+    if(!r.ok) throw new Error();
+    const p=await r.json();
+    const el=document.getElementById("perf-problem");
+    if(!el||currentQuestion!==q) return;
+    const o=p.overall, m=p.mine;
+    const rateBar=o.solveRate==null?"":`<div class="diff-bar" style="margin:4px 0 8px"><span style="width:${o.solveRate}%"></span></div>`;
+    const memLine=o.maxMemKb!=null?` · 🧠 max ~${o.maxMemKb>=1024?(o.maxMemKb/1024).toFixed(1)+" MB":o.maxMemKb+" KB"}`:"";
+    const everyone=`<h3 style="font-size:14px;margin:12px 0 6px;color:var(--text)">Everyone</h3><div style="font-size:12px">${o.submissions} submissions · ${o.attempted} attempted · ${o.solved} solved · ${o.solveRate==null?"–":o.solveRate+"% solve rate"}</div>${rateBar}<div style="font-size:12px">⏱ avg ${o.avgTimeMs==null?"–":o.avgTimeMs+"ms"}${memLine}</div>`;
+    let mineH="";
+    if(!getToken()) mineH=`<h3 style="font-size:14px;margin:12px 0 6px;color:var(--text)">You</h3><div style="font-size:12px"><a href="login.html" class="ghost-link">Login</a> to see your stats.</div>`;
+    else if(!m||!m.submissions) mineH=`<h3 style="font-size:14px;margin:12px 0 6px;color:var(--text)">You</h3><div style="font-size:12px">No submissions yet.</div>`;
+    else {
+      const mr=m.submissions?Math.round(m.solves/m.submissions*100):0;
+      const rows=m.recent.map(s=>{
+        const dt=s.createdAt?new Date(s.createdAt).toLocaleString():"—";
+        const ok=s.passed===s.total;
+        const tm=s.avgTimeMs!=null?` · ~${s.avgTimeMs}ms`:"";
+        const cxS=(s.complexityTime||s.complexitySpace)?` · ${esc(s.complexityTime||"?")}/${esc(s.complexitySpace||"?")}`:"";
+        return `<div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;padding:4px 0;border-top:1px solid var(--border)"><span style="color:${ok?"#00b8a3":"#ffa116"};font-weight:700">${ok?"✓":"●"}</span><span>${esc(dt)}</span><span style="color:var(--muted)">${esc(s.mode)} · ${esc(s.language)} · ${s.passed}/${s.total}${tm}${cxS}</span></div>`;
+      }).join("");
+      mineH=`<h3 style="font-size:14px;margin:12px 0 6px;color:var(--text)">You</h3><div style="font-size:12px">${m.submissions} submissions · ${m.solves} solved · ${mr}% solve rate${m.bestAvgMs!=null?` · best avg ~${m.bestAvgMs}ms`:""}</div><div style="margin-top:6px">${rows}</div>`;
+    }
+    el.innerHTML=everyone+mineH;
+    el.style.color="";
+  }catch{ const el=document.getElementById("perf-problem"); if(el) el.textContent="Problem stats unavailable."; }
 }
 function renderResults(payload) {
   if(!resultsEl) return;
@@ -705,6 +760,8 @@ function renderResults(payload) {
   });
   if(lastRunMeta) lastRunMeta.textContent = `${mode} · ${passed}/${total} · ${new Date().toLocaleTimeString()}`;
   if(statusText) statusText.textContent = allPass ? "All tests passed ✓" : `${total-passed} test(s) failed`;
+  window.__lastRun = { questionId: currentQuestion && currentQuestion.id, mode, passed, total, results, ts: Date.now() };
+  if(isPerfActive()) renderPerformance();
 }
 
 async function localRun(mode) {
@@ -1303,6 +1360,8 @@ document.querySelectorAll(".ptab").forEach(btn=>{
     // Right panel follows left tab: desc -> editor, submissions -> submission view (or empty)
     if(btn.dataset.ptab === "desc"){
       showEditMode();
+    } else if(btn.dataset.ptab === "perf"){
+      renderPerformance();
     } else if(btn.dataset.ptab === "submissions"){
       // if already viewing, keep it; else show empty placeholder in right panel
       if(!viewingSubmission){

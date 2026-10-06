@@ -59,6 +59,7 @@
         <div class="problem-tabs">
           <button class="ptab active" data-ptab="desc">Description</button>
           <button class="ptab" data-ptab="submissions">Submissions</button>
+          <button class="ptab" data-ptab="perf">Performance</button>
         </div>
         <div id="ptab-desc" class="ptab-panel active">
           <div id="problem-view">
@@ -78,6 +79,9 @@
           </div>
           <div id="history-list" class="history-list"></div>
           <div style="color:var(--muted);font-size:12px;padding:8px 0">Select a submission to view code &amp; results in the right panel.</div>
+        </div>
+        <div id="ptab-perf" class="ptab-panel">
+          <div id="perf-view"><div class="empty-state"><h2>Performance</h2><p>Run or submit to see timing, memory and complexity stats here.</p></div></div>
         </div>
       </section>
 
