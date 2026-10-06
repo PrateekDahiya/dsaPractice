@@ -643,6 +643,31 @@ if(formatBtn) formatBtn.addEventListener("click", () => {
   toast("Formatted");
 });
 
+function fmtMem(kb){ if(kb==null) return ""; return kb>=1024?` · ~${(kb/1024).toFixed(1)} MB`:` · ~${kb} KB`; }
+function runStatsHtml(results){
+  if(!results || !results.length) return "";
+  const times=results.map(r=>r.timeMs||0);
+  const avg=Math.round(times.reduce((a,b)=>a+b,0)/times.length);
+  const max=Math.max(...times);
+  const mems=results.map(r=>r.memKb).filter(m=>m!=null);
+  const mem=mems.length?` · 🧠 max${fmtMem(Math.max(...mems))}`:" · 🧠 memory n/a";
+  return `<div class="run-stats" style="font-size:12px;color:var(--muted);margin:-4px 0 10px">⏱ avg ${avg}ms · max ${max}ms${mem}</div>`;
+}
+async function requestComplexity(question, code, lang){
+  const line=document.getElementById("complexity-line");
+  if(!line || !question) return;
+  try{
+    const res=await apiFetch("/api/complexity",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({questionId:question.id,language:lang,code})});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(d.error||("status "+res.status));
+    const norm=s=>String(s||"").replace(/\s+/g,"");
+    const tOk=!d.expectedTime||norm(d.time)===norm(d.expectedTime);
+    const sOk=!d.expectedSpace||norm(d.space)===norm(d.expectedSpace);
+    const exp=(d.expectedTime||d.expectedSpace)?` · expected ${d.expectedTime||"?"} / ${d.expectedSpace||"?"}`:"";
+    const mark=(d.expectedTime||d.expectedSpace)?(tOk&&sOk?" ✓":" ⚠"):"";
+    line.innerHTML=`Complexity (AI): yours <strong>${esc(d.time)} time · ${esc(d.space)} space</strong>${esc(exp)}${mark}${d.note?` — <span style="color:var(--muted)">${esc(d.note)}</span>`:""}`;
+  }catch(e){ line.textContent="Complexity unavailable ("+e.message+")"; }
+}
 function renderResults(payload) {
   if(!resultsEl) return;
   const { mode, results, total, passed } = payload;
@@ -652,11 +677,13 @@ function renderResults(payload) {
       <div class="results-title">${mode==="run" ? "Run — Visible Tests" : "Submit — All Tests"}</div>
       <span class="results-summary ${allPass?'pass':'fail'}">${passed} / ${total} passed</span>
     </div>
+    ${runStatsHtml(results)}
+    ${mode==="submit"?`<div id="complexity-line" class="run-stats" style="font-size:12px;color:var(--muted);margin:-4px 0 10px">Analyzing complexity…</div>`:""}
     ${results.map((r,i)=>`
       <div class="test-case ${i===0?'open':''}">
         <div class="test-case-header">
           <span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden ? '(hidden)' : ''} — ${r.passed?'Passed':'Failed'}</span>
-          <span class="test-vis">${r.hidden ? 'hidden' : 'visible'}${r.timeMs!=null?` · ${r.timeMs}ms`:''}</span>
+          <span class="test-vis">${r.hidden ? 'hidden' : 'visible'}${r.timeMs!=null?` · ${r.timeMs}ms`:''}${fmtMem(r.memKb)}</span>
         </div>
         <div class="test-body">
           <div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input, null, 2))}</pre></span></div>
@@ -955,7 +982,7 @@ async function execute(mode) {
     const appendCase = (r, idx) => {
       const div = document.createElement("div");
       div.className = "test-case open";
-      div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:JSON.stringify(r.actual,null,2))}</pre></span></div></div>`;
+      div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}${fmtMem(r.memKb)}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:JSON.stringify(r.actual,null,2))}</pre></span></div></div>`;
       if(streamContainer) streamContainer.appendChild(div);
       const hdr = resultsEl.querySelector(".results-summary");
       if(hdr) hdr.textContent = `${results.filter(x=>x.passed).length} / ${total} passed`;
@@ -978,6 +1005,7 @@ async function execute(mode) {
     }
     payload = { mode, total, passed: results.filter(r=>r.passed).length, results };
     renderResults(payload);
+    if(mode==="submit") requestComplexity(currentQuestion, code, currentLang);
     hideLoader();
     if(runBtn) { runBtn.disabled = false; runBtn.textContent = "Run"; }
     if(submitBtn) submitBtn.disabled = false;
@@ -1000,6 +1028,7 @@ async function execute(mode) {
     }
     payload = await res.json();
     renderResults(payload);
+    if(mode==="submit") requestComplexity(currentQuestion, code, currentLang);
   } catch (e) {
     console.warn("API execute failed, fallback local", e);
     if (String(e.message).includes("Failed to fetch") || String(e.message).includes("fetch")) {
