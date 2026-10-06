@@ -1,8 +1,12 @@
 const { getPool } = require('./pool');
 
-async function dbCreateSubmission({questionId, title, language, mode, code, passed, total, results, userId}) {
-  const [res] = await getPool().query(`INSERT INTO submissions (questionId, title, language, mode, code, passed, total, results, userId) VALUES (?,?,?,?,?,?,?,?,?)`, [questionId, title||null, language, mode, code, passed, total, JSON.stringify(results), userId||null]);
+async function dbCreateSubmission({questionId, title, language, mode, code, passed, total, results, userId, avgTimeMs, maxTimeMs, maxMemKb, complexityTime, complexitySpace}) {
+  const [res] = await getPool().query(`INSERT INTO submissions (questionId, title, language, mode, code, passed, total, results, userId, avgTimeMs, maxTimeMs, maxMemKb, complexityTime, complexitySpace) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [questionId, title||null, language, mode, code, passed, total, JSON.stringify(results), userId||null, avgTimeMs ?? null, maxTimeMs ?? null, maxMemKb ?? null, complexityTime || null, complexitySpace || null]);
   return res.insertId;
+}
+async function dbUpdateSubmissionComplexity(id, time, space, userId) {
+  const [res] = await getPool().query('UPDATE submissions SET complexityTime=?, complexitySpace=? WHERE id=? AND userId<=>?', [time, space, id, userId]);
+  return res.affectedRows > 0;
 }
 async function dbGetSubmissions(questionId, limit=50, userId=null) {
   let rows; const pool = getPool();
@@ -27,8 +31,10 @@ async function dbGetSubmissions(questionId, limit=50, userId=null) {
   return rows.map(r => ({
     id: r.id, questionId: r.questionId, title: r.title, language: r.language, mode: r.mode, code: r.code, passed: r.passed, total: r.total,
     results: typeof r.results==='string' ? JSON.parse(r.results) : r.results,
+    avgTimeMs: r.avgTimeMs ?? null, maxTimeMs: r.maxTimeMs ?? null, maxMemKb: r.maxMemKb ?? null,
+    complexityTime: r.complexityTime || null, complexitySpace: r.complexitySpace || null,
     userId: r.userId || null, ts: new Date(r.createdAt).getTime(), createdAt: new Date(r.createdAt).toISOString()
   }));
 }
 
-module.exports = { dbCreateSubmission, dbGetSubmissions };
+module.exports = { dbCreateSubmission, dbUpdateSubmissionComplexity, dbGetSubmissions };

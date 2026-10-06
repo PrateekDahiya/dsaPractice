@@ -1295,15 +1295,46 @@ const server = http.createServer(async (req, res) => {
     req.on("data", chunk => body += chunk);
     req.on("end", async () => {
       try {
-        const { questionId, language, mode, code, passed, total, results, title } = JSON.parse(body || "{}");
+        const { questionId, language, mode, code, passed, total, results, title, complexityTime, complexitySpace } = JSON.parse(body || "{}");
         if (!questionId || !language || !mode || code===undefined) return sendJson(res, { error: "Missing fields" }, 400);
         tryAuthenticate(req);
         const userId = req.user ? req.user.id : null;
+        const arr = Array.isArray(results) ? results : [];
+        const times = arr.map(r=>r && r.timeMs).filter(t=>t!=null);
+        const mems = arr.map(r=>r && r.memKb).filter(m=>m!=null);
+        const { isBigO } = require("./server/utils/groq");
+        const stats = {
+          avgTimeMs: times.length ? Math.round(times.reduce((a,b)=>a+b,0)/times.length) : null,
+          maxTimeMs: times.length ? Math.max(...times) : null,
+          maxMemKb: mems.length ? Math.max(...mems) : null,
+          complexityTime: isBigO(complexityTime) ? complexityTime.trim() : null,
+          complexitySpace: isBigO(complexitySpace) ? complexitySpace.trim() : null,
+        };
         let id=null;
-        if (useDb) { await ensureDb(); if (dbReady) id = await db.dbCreateSubmission({questionId, title, language, mode, code, passed, total, results: results||[], userId}); }
+        if (useDb) { await ensureDb(); if (dbReady) id = await db.dbCreateSubmission({questionId, title, language, mode, code, passed, total, results: results||[], userId, ...stats}); }
         cache.leaderboard.clear();
         if (userId && db.clearStatsCache) db.clearStatsCache(userId);
         return sendJson(res, { ok:true, id }, 201);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
+  if (pathname.match(/^\/api\/submissions\/\d+\/complexity$/) && req.method === "POST") {
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const id = parseInt(pathname.split("/")[3], 10);
+        const { time, space } = JSON.parse(body || "{}");
+        const { isBigO } = require("./server/utils/groq");
+        if (!isBigO(time) || !isBigO(space)) return sendJson(res, { error: "bad complexity (want O(...))" }, 400);
+        tryAuthenticate(req);
+        const userId = req.user ? req.user.id : null;
+        await ensureDb();
+        if (!dbReady || !db.dbUpdateSubmissionComplexity) return sendJson(res, { error: "DB not ready" }, 500);
+        const ok = await db.dbUpdateSubmissionComplexity(id, time.trim(), space.trim(), userId);
+        if (!ok) return sendJson(res, { error: "submission not found" }, 404);
+        return sendJson(res, { ok: true }, 200);
       } catch (e) { return sendJson(res, { error: e.message }, 500); }
     });
     return;

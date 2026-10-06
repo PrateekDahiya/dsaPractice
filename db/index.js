@@ -3,7 +3,7 @@ const { initDb } = require('./init');
 const { migrateFromFiles, dbLoadQuestions, dbGetQuestion, dbCreateQuestion } = require('./questions');
 const { createUser, findUserByUsername, findUserById, findUserByEmail } = require('./users');
 const { dbSaveCode, dbGetCode } = require('./code');
-const { dbCreateSubmission, dbGetSubmissions } = require('./submissions');
+const { dbCreateSubmission, dbUpdateSubmissionComplexity, dbGetSubmissions } = require('./submissions');
 const { getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, clearStatsCache } = require('./stats');
 const { markDone, unmarkDone, getManualSolvedIds, isMarkedDone } = require('./manual');
 const { seedMethodDocs, searchMethods, getMethodDoc } = require('./methods');
@@ -13,7 +13,7 @@ module.exports = {
   dbLoadQuestions, dbGetQuestion, dbCreateQuestion,
   createUser, findUserByUsername, findUserById, findUserByEmail,
   dbSaveCode, dbGetCode,
-  dbCreateSubmission, dbGetSubmissions,
+  dbCreateSubmission, dbUpdateSubmissionComplexity, dbGetSubmissions,
   getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, clearStatsCache,
   markDone, unmarkDone, getManualSolvedIds, isMarkedDone,
   seedMethodDocs, searchMethods, getMethodDoc

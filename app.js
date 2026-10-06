@@ -655,17 +655,23 @@ function runStatsHtml(results){
 }
 async function requestComplexity(question, code, lang){
   const line=document.getElementById("complexity-line");
+  window.__lastComplexity=null;
   if(!line || !question) return;
   try{
     const res=await apiFetch("/api/complexity",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({questionId:question.id,language:lang,code})});
     const d=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(d.error||("status "+res.status));
+    window.__lastComplexity={time:d.time,space:d.space};
     const norm=s=>String(s||"").replace(/\s+/g,"");
     const tOk=!d.expectedTime||norm(d.time)===norm(d.expectedTime);
     const sOk=!d.expectedSpace||norm(d.space)===norm(d.expectedSpace);
     const exp=(d.expectedTime||d.expectedSpace)?` · expected ${d.expectedTime||"?"} / ${d.expectedSpace||"?"}`:"";
     const mark=(d.expectedTime||d.expectedSpace)?(tOk&&sOk?" ✓":" ⚠"):"";
     line.innerHTML=`Complexity (AI): yours <strong>${esc(d.time)} time · ${esc(d.space)} space</strong>${esc(exp)}${mark}${d.note?` — <span style="color:var(--muted)">${esc(d.note)}</span>`:""}`;
+    const sid=window.__lastSubmissionId;
+    if(sid){
+      try{ await apiFetch(`/api/submissions/${sid}/complexity`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({time:d.time,space:d.space})}); }catch{}
+    }
   }catch(e){ line.textContent="Complexity unavailable ("+e.message+")"; }
 }
 function renderResults(payload) {
@@ -776,6 +782,10 @@ async function fetchHistoryFromDb() {
 }
 function loadHistory() { return historyCache; }
 async function saveHistoryEntry(entry) {
+  if (entry.mode === "submit" && window.__lastComplexity && !entry.complexityTime) {
+    entry.complexityTime = window.__lastComplexity.time;
+    entry.complexitySpace = window.__lastComplexity.space;
+  }
   try {
     const h = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
     h.unshift(entry);
@@ -794,11 +804,16 @@ async function saveHistoryEntry(entry) {
         code: entry.code,
         passed: entry.passed,
         total: entry.total,
-        results: entry.results
+        results: entry.results,
+        complexityTime: entry.complexityTime || null,
+        complexitySpace: entry.complexitySpace || null
       })
     });
     if(res && res.status===401){
       // not logged in — history stays local only
+    } else if (res) {
+      const d = await res.json().catch(()=>({}));
+      if (d && d.id && entry.mode === "submit") window.__lastSubmissionId = d.id;
     }
   } catch {}
   await renderHistory();
@@ -852,7 +867,8 @@ function showSubmissionView(e){
     }
   }
   if(resultsEl2){
-    resultsEl2.innerHTML = `<div class="results-header"><div class="results-title">Results ${e.passed}/${e.total}</div></div>` +
+    const cx=(e.complexityTime||e.complexitySpace)?`<div class="run-stats" style="font-size:12px;color:var(--muted);margin:-4px 0 10px">Complexity (AI): ${esc(e.complexityTime||"?")} time · ${esc(e.complexitySpace||"?")} space</div>`:"";
+    resultsEl2.innerHTML = `<div class="results-header"><div class="results-title">Results ${e.passed}/${e.total}</div></div>` + runStatsHtml(e.results||[]) + cx +
       (e.results ? e.results.map((r,i)=>`<div class="test-case open"><div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error || JSON.stringify(r.actual))}</pre></span></div></div></div>`).join("") : "no results");
   }
   const restoreBtn = document.getElementById("submission-restore-btn");
@@ -973,6 +989,8 @@ async function execute(mode) {
   if(resultsEl) resultsEl.innerHTML = `<div class="loading">Executing ${mode==="run"?"visible":"all"} tests...</div>`;
   let payload = null;
   let execError = null;
+  window.__lastComplexity = null;
+  window.__lastSubmissionId = null;
   // Best: per-testcase API — UI renders each case immediately, no waiting for all
   try {
     const total = currentQuestion.visibleTestCases.length + (mode==="submit"?currentQuestion.hiddenTestCases.length:0);

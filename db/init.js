@@ -110,6 +110,11 @@ async function initDb() {
   try { await pool.query(`ALTER TABLE questions ADD COLUMN addedByUsername VARCHAR(50) NULL`); } catch {}
   try { await pool.query(`ALTER TABLE questions ADD INDEX idx_addedBy (addedBy)`); } catch {}
   try { await pool.query(`ALTER TABLE questions ADD CONSTRAINT fk_questions_addedBy FOREIGN KEY (addedBy) REFERENCES users(id) ON DELETE SET NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE submissions ADD COLUMN avgTimeMs INT NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE submissions ADD COLUMN maxTimeMs INT NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE submissions ADD COLUMN maxMemKb INT NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE submissions ADD COLUMN complexityTime VARCHAR(50) NULL`); } catch {}
+  try { await pool.query(`ALTER TABLE submissions ADD COLUMN complexitySpace VARCHAR(50) NULL`); } catch {}
   await pool.query(`
     CREATE TABLE IF NOT EXISTS manual_solved (
       userId INT NOT NULL,
