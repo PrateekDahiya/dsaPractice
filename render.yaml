@@ -1,13 +1,27 @@
 services:
   - type: web
     name: dsa-practice
-    env: node
-    plan: starter
-    buildCommand: npm install
-    startCommand: node server.js
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=320
+      - key: UV_THREADPOOL_SIZE
+        value: 4
+      - key: ENABLE_PCH
+        value: 0
+      - key: DB_POOL_MAX
+        value: 2
+      - key: EXEC_MAX_CPP
+        value: 1
+      - key: EXEC_MAX_PYTHON
+        value: 2
+      - key: EXEC_MAX_TOTAL
+        value: 3
       - key: DB_HOST
         fromDatabase:
           name: dsaQuestions

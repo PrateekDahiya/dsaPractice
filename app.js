@@ -427,6 +427,7 @@ function saveCode() {
 let lastDbSavedCode = "";
 async function saveCodeToDb() {
   if (!currentQuestion || !codeEditor) return;
+  try { if (document.hidden) return; } catch {}
   const code = getCode();
   if (code === lastDbSavedCode) return;
   if (!code.trim()) return;
@@ -443,9 +444,9 @@ async function saveCodeToDb() {
     lastDbSavedCode = code;
   } catch {}
 }
-setInterval(saveCodeToDb, 10000);
+setInterval(saveCodeToDb, 20000);
 let saveDebounce = null;
-function scheduleDbSave(){ clearTimeout(saveDebounce); saveDebounce=setTimeout(saveCodeToDb, 2000); }
+function scheduleDbSave(){ clearTimeout(saveDebounce); saveDebounce=setTimeout(saveCodeToDb, 4000); }
 if(codeEditor) codeEditor.addEventListener("input", () => { saveCode(); scheduleDbSave(); });
 if(langSelect) langSelect.addEventListener("change", async () => {
   await saveCodeToDb();
