@@ -1,6 +1,6 @@
 const { getPool } = require('./pool');
 const { initDb } = require('./init');
-const { migrateFromFiles, dbLoadQuestions, dbGetQuestion, dbCreateQuestion } = require('./questions');
+const { migrateFromFiles, dbLoadQuestions, dbGetQuestion, dbCreateQuestion, dbUpdateQuestion, dbDeleteQuestion } = require('./questions');
 const { createUser, findUserByUsername, findUserById, findUserByEmail } = require('./users');
 const { dbSaveCode, dbGetCode } = require('./code');
 const { dbCreateSubmission, dbUpdateSubmissionComplexity, dbGetSubmissions } = require('./submissions');
@@ -11,7 +11,7 @@ const { seedMethodDocs, searchMethods, getMethodDoc } = require('./methods');
 
 module.exports = {
   getPool, initDb, migrateFromFiles,
-  dbLoadQuestions, dbGetQuestion, dbCreateQuestion,
+  dbLoadQuestions, dbGetQuestion, dbCreateQuestion, dbUpdateQuestion, dbDeleteQuestion,
   createUser, findUserByUsername, findUserById, findUserByEmail,
   dbSaveCode, dbGetCode,
   dbCreateSubmission, dbUpdateSubmissionComplexity, dbGetSubmissions,

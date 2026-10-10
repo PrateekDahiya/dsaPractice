@@ -96,5 +96,18 @@ async function dbCreateQuestion(q, addedBy=null, addedByUsername=null) {
     [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt, addedBy, addedByUsername]
   );
 }
+async function dbUpdateQuestion(id, q) {
+  const pool = getPool();
+  const [res] = await pool.query(
+    `UPDATE questions SET title=?, difficulty=?, tags=?, problemStatement=?, constraints=?, examples=?, functionName=?, pythonFunctionName=?, cppFunctionName=?, params=?, starterCode=?, visibleTestCases=?, hiddenTestCases=?, timeComplexity=?, spaceComplexity=?, updatedAt=NOW() WHERE id=?`,
+    [q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, id]
+  );
+  return res.affectedRows > 0;
+}
+async function dbDeleteQuestion(id) {
+  const pool = getPool();
+  const [res] = await pool.query(`DELETE FROM questions WHERE id=?`, [id]);
+  return res.affectedRows > 0;
+}
 
-module.exports = { migrateFromFiles, dbLoadQuestions, dbGetQuestion, dbCreateQuestion };
+module.exports = { migrateFromFiles, dbLoadQuestions, dbGetQuestion, dbCreateQuestion, dbUpdateQuestion, dbDeleteQuestion };

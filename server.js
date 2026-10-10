@@ -357,6 +357,21 @@ function requireAuth(req, res) {
   }
   return u;
 }
+function isAdmin(u) {
+  return !!u && u.role === "admin";
+}
+function requireAdmin(req, res) {
+  const u = authenticate(req);
+  if (!u) {
+    sendJson(res, { error: "Unauthorized" }, 401);
+    return null;
+  }
+  if (!isAdmin(u)) {
+    sendJson(res, { error: "Forbidden: admin only" }, 403);
+    return null;
+  }
+  return u;
+}
 
 const MIME = {
   ".html": "text/html",
@@ -1255,6 +1270,68 @@ const server = http.createServer(async (req, res) => {
         if (bad) return sendJson(res, { error: bad }, 400);
         await persistQuestion(q, u);
         return sendJson(res, { ok: true, id: q.id }, 201);
+      } catch (e) {
+        if (e && e.status) return sendJson(res, { error: e.message }, e.status);
+        console.error(e);
+        return sendJson(res, { error: "Invalid JSON: " + e.message }, 400);
+      }
+    });
+    return;
+  }
+  // Edit / delete a question (owner or admin). Single-segment id only, so
+  // /mark-done and /perf sub-routes never match here.
+  if (pathname.match(/^\/api\/questions\/[^/]+$/) && (req.method === "PUT" || req.method === "DELETE")) {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    const qid = decodeURIComponent(pathname.split("/").filter(Boolean)[2]);
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const existing = await getQuestionById(qid);
+        if (!existing) return sendJson(res, { error: "Question not found" }, 404);
+        const ownerId = existing.addedBy != null ? Number(existing.addedBy) : null;
+        if (!isAdmin(u) && ownerId !== Number(u.id)) {
+          return sendJson(res, { error: "Forbidden: only the author or an admin can modify this question" }, 403);
+        }
+        if (req.method === "DELETE") {
+          if (useDb) {
+            await ensureDb();
+            if (dbReady && db.dbDeleteQuestion) await db.dbDeleteQuestion(qid);
+          }
+          try { fs.unlinkSync(path.join(QUESTIONS_DIR, `${qid}.json`)); } catch {}
+          try { questionCache.delete(qid); } catch {}
+          cache.questions = null;
+          cache.leaderboard.clear();
+          console.log(`Question deleted: ${qid} by ${u.username}${isAdmin(u) ? " (admin)" : ""}`);
+          return sendJson(res, { ok: true, id: qid }, 200);
+        }
+        const q = JSON.parse(body || "{}");
+        if (q.id && q.id !== qid) return sendJson(res, { error: "Question id in body must match URL (ids are immutable)" }, 400);
+        q.id = qid;
+        const errs = validateQuestionPayload(q);
+        if (errs.length) return sendJson(res, { error: errs.join("; ") }, 400);
+        const bad = validateTestCaseInputs([...q.visibleTestCases, ...q.hiddenTestCases], q.params);
+        if (bad) return sendJson(res, { error: bad }, 400);
+        if (!q.createdAt && existing.createdAt) q.createdAt = existing.createdAt;
+        q.updatedAt = new Date().toISOString();
+        if (useDb) {
+          await ensureDb();
+          if (dbReady && db.dbUpdateQuestion) {
+            const ok = await db.dbUpdateQuestion(qid, q);
+            if (!ok) return sendJson(res, { error: "Question not found" }, 404);
+          }
+        }
+        // refresh file backup (overwrite) so file fallback stays in sync
+        try {
+          const fileQ = { ...q, addedBy: existing.addedBy ?? null, addedByUsername: existing.addedByUsername ?? null };
+          fs.writeFileSync(path.join(QUESTIONS_DIR, `${qid}.json`), JSON.stringify(fileQ, null, 2), "utf8");
+        } catch (e) { console.warn("question file backup failed:", e.message); }
+        try { questionCache.delete(qid); } catch {}
+        cache.questions = null;
+        cache.leaderboard.clear();
+        console.log(`Question updated: ${qid} by ${u.username}${isAdmin(u) ? " (admin)" : ""}`);
+        return sendJson(res, { ok: true, id: qid }, 200);
       } catch (e) {
         if (e && e.status) return sendJson(res, { error: e.message }, e.status);
         console.error(e);

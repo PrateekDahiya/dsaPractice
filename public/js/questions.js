@@ -236,6 +236,11 @@ function renderProblem() {
   const isSolved = solvedSet.has(q.id);
   const isManual = manualSet.has(q.id);
   const isBookmarked = bookmarkedSet.has(q.id);
+  const me = getUser();
+  const canEdit = !!me && (me.role === "admin" || (q.addedBy != null && Number(q.addedBy) === Number(me.id)));
+  const editBtnsHtml = canEdit
+    ? `<button id="edit-q-btn" class="btn ghost" style="padding:6px 12px;font-size:12px" title="Edit this question">Edit</button><button id="delete-q-btn" class="btn ghost" style="padding:6px 12px;font-size:12px;color:var(--red)" title="Delete this question">Delete</button>`
+    : "";
   const bookmarkBtnHtml = (() => {
     if(!getToken()) return "";
     return `<button id="bookmark-btn" class="btn ghost" style="padding:6px 10px;font-size:13px" title="${isBookmarked ? "Remove bookmark" : "Bookmark for later"}">${isBookmarked ? "★" : "☆"}</button>`;
@@ -251,7 +256,7 @@ function renderProblem() {
     <div class="problem-meta">
       <span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span>
       <span style="color:var(--muted);font-size:13px">${(q.tags||[]).join(" · ")}</span>
-      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${bookmarkBtnHtml}${markBtnHtml}</span>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${bookmarkBtnHtml}${markBtnHtml}${editBtnsHtml}</span>
     </div>
     <div class="problem-statement">${q.problemStatement}</div>
     ${q.examples ? `<div class="examples"><h3>Examples</h3>${q.examples.map((ex,i)=>`
@@ -269,4 +274,27 @@ function renderProblem() {
   if(markBtn) markBtn.addEventListener("click", toggleMarkDone);
   const bookmarkBtn = document.getElementById("bookmark-btn");
   if(bookmarkBtn) bookmarkBtn.addEventListener("click", toggleBookmark);
+  const editQBtn = document.getElementById("edit-q-btn");
+  if(editQBtn) editQBtn.addEventListener("click", () => openEditModal(currentQuestion));
+  const deleteQBtn = document.getElementById("delete-q-btn");
+  if(deleteQBtn) deleteQBtn.addEventListener("click", deleteCurrentQuestion);
+}
+
+async function deleteCurrentQuestion(){
+  if(!currentQuestion) return;
+  const qid = currentQuestion.id;
+  if(!confirm(`Delete "${currentQuestion.title}" permanently? Submissions for it will also be removed.`)) return;
+  try{
+    const res = await apiFetch(`/api/questions/${encodeURIComponent(qid)}`, { method: "DELETE" });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || "delete failed");
+    toast("Deleted " + qid);
+    invalidateCache("/api/questions");
+    currentQuestion = null;
+    await fetchQuestions();
+    if(questions.length) await loadQuestion(questions[0].id);
+    else if(problemViewEl) problemViewEl.innerHTML = `<div class="empty-state"><h2>No questions</h2><p>Add one to get started.</p></div>`;
+  }catch(e){
+    toast("Delete failed: " + e.message);
+  }
 }
