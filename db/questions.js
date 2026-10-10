@@ -4,8 +4,20 @@ const { getPool } = require('./pool');
 
 async function migrateFromFiles(questionsDir) {
   if (!fs.existsSync(questionsDir)) return;
-  const files = fs.readdirSync(questionsDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
   const pool = getPool();
+  // Fast path: if the table already holds at least as many questions as there
+  // are files, there is nothing new to import — skip ~20 sequential INSERT
+  // roundtrips on every boot (seconds on hosted DBs). New files still trigger
+  // a full pass via the count comparison below.
+  try {
+    const files = fs.readdirSync(questionsDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
+    const [[{ c }]] = await pool.query('SELECT COUNT(*) as c FROM questions');
+    if (Number(c) >= files.length) {
+      console.log(`DB: migrate skipped (${c} rows >= ${files.length} files)`);
+      return;
+    }
+  } catch (e) { console.warn('migrate count check failed, running full pass:', e.message); }
+  const files = fs.readdirSync(questionsDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
   for (const file of files) {
     try {
       const raw = fs.readFileSync(path.join(questionsDir, file), 'utf8');

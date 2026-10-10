@@ -131,10 +131,12 @@ async function initDb() {
     const { seedMethodDocs } = require('./methods');
     await seedMethodDocs();
   } catch (e) { console.warn('method docs seed skipped', e.message); }
-  // Low-memory warmup: 1 idle connection (DB_POOL_MAX bounds the pool).
+  // Low-memory warmup: pre-create up to DB_POOL_MAX idle connections so the
+  // first real queries don't pay TLS handshakes inline (each costs ~0.5s to
+  // hosted DBs). Defaults to the pool max (2).
   try {
     const { warmPool } = require('./pool');
-    await warmPool(parseInt(process.env.DB_POOL_WARM || '1', 10) || 1);
+    await warmPool(parseInt(process.env.DB_POOL_WARM || process.env.DB_POOL_MAX || '2', 10) || 2);
   } catch (e) { console.warn('pool warmup skipped', e.message); }
   console.log('DB: questions, users, bookmarks, code_saves, submissions ready (pool warmed)');
   return pool;

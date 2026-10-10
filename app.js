@@ -336,13 +336,14 @@ async function loadQuestion(id) {
     currentQuestion = q;
     syncQuestionCtx();
     renderProblem();
-    await loadStarterCode();
+    // Starter code + history are independent fetches: run in parallel instead
+    // of sequentially (each is a 0.3-1s DB roundtrip on hosted deployments).
+    await Promise.all([loadStarterCode(), renderHistory()]);
     if (window.__oe && typeof window.__oe.resetUndo === "function") { try { window.__oe.resetUndo(); } catch {} }
     renderList();
     if(resultsEl) resultsEl.innerHTML = `<div style="color:var(--muted);font-size:13px">Hit <strong>Run</strong> to test visible cases, <strong>Submit</strong> for all.</div>`;
     if(statusText) statusText.textContent = `Loaded: ${q.title}`;
     history.replaceState(null, "", `#${id}`);
-    renderHistory();
     if(isPerfActive()) renderPerformance();
     hideLoader();
   } catch (e) {
