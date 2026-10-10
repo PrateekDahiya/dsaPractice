@@ -33,7 +33,7 @@
   <div class="lb-wrap" style="max-width:1100px">
     <h1 style="font-size:22px;margin-bottom:6px">Striver A2Z Roadmap</h1>
     <p style="color:var(--muted);font-size:13px;margin-bottom:6px">20 steps, basics to advanced — your questions slotted in, gaps fillable with AI.</p>
-    <div id="overall" style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px">Loading...</div>
+    <div id="overall" style="margin-bottom:16px;font-size:13px">Loading...</div>
     <div id="ai-note" class="hidden" style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--muted)"></div>
     <div id="steps"></div>
   </div>
@@ -133,49 +133,81 @@
     }
 
     function qRow(q){
-      const mark=solvedSet.has(q.id)?'<span style="color:#00b8a3;font-weight:700" title="Solved">✓</span>':(attemptedSet.has(q.id)?'<span style="color:#ffa116;font-weight:700" title="Attempted">●</span>':'<span style="color:var(--muted)" title="Todo">·</span>');
-      const ai=(q.tags||[]).includes("ai-generated")?' <span style="font-size:10px;color:var(--muted)" title="AI generated">AI</span>':"";
+      const st=solvedSet.has(q.id)?"solved":(attemptedSet.has(q.id)?"attempted":"todo");
+      const mark=st==="solved"?'<span class="rm-mark" title="Solved">✓</span>':(st==="attempted"?'<span class="rm-mark" title="Attempted">●</span>':'<span class="rm-mark" title="Todo">·</span>');
+      const ai=(q.tags||[]).includes("ai-generated")?'<span class="rm-ai" title="AI generated">AI</span>':"";
       const topics=(q.tags||[]).filter(t=>t!=="ai-generated"&&!t.startsWith("roadmap:"));
       const s=statsMap[q.id]||{attempted:0,submissions:0,solved:0};
       const rate=s.attempted?Math.round(s.solved/s.attempted*100)+"%":"–";
-      return `<div style="display:flex;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid var(--border);font-size:13px;flex-wrap:wrap">
-        ${mark}<a href="index.html#${esc(q.id)}" style="font-weight:600;color:var(--text);text-decoration:none">${esc(q.title)}</a>${ai}
+      return `<div class="rm-row ${st}">
+        ${mark}<a href="index.html#${esc(q.id)}" class="rm-qtitle">${esc(q.title)}</a>${ai}
         <span class="badge ${esc(q.difficulty)}" style="font-size:11px">${esc(q.difficulty)}</span>
-        <span style="color:var(--muted);font-size:12px">${topics.map(esc).join(" · ")||"general"}</span>
-        <span style="margin-left:auto;font-size:12px;color:var(--muted)" title="${s.submissions} total tries">${s.attempted} attempted · ${s.solved} solved · ${rate}</span>
+        <span class="rm-topics">${topics.map(esc).join(" · ")||"general"}</span>
+        <span class="rm-stats" title="${s.submissions} total tries">${s.attempted} attempted · ${s.solved} solved · ${rate}</span>
       </div>`;
     }
 
+    const rmCollapsed=new Set();
     function render(){
       const allIds=new Set();
       const perStep=STEPS.map(s=>({step:s, ...stepQuestions(s)}));
       perStep.forEach(({matched})=>matched.forEach(q=>allIds.add(q.id)));
+      const allMatched=[...allIds].map(id=>questions.find(q=>q.id===id)).filter(Boolean);
       const solved=[...allIds].filter(id=>solvedSet.has(id)).length;
-      $("#overall").innerHTML=`<strong>${solved} / ${allIds.size}</strong> roadmap questions solved${getToken()?"":" — <a href='login.html' class='ghost-link'>login</a> to track progress"}`;
+      const pctAll=allIds.size?Math.round(solved/allIds.size*100):0;
+      const byDiff={Easy:{s:0,t:0},Medium:{s:0,t:0},Hard:{s:0,t:0}};
+      for(const q of allMatched){
+        const d=byDiff[q.difficulty];
+        if(!d) continue;
+        d.t++;
+        if(solvedSet.has(q.id)) d.s++;
+      }
+      $("#overall").innerHTML=`<div class="rm-hero">
+        <div class="rm-hero-num"><strong>${solved} / ${allIds.size}</strong><span>roadmap questions solved${getToken()?"":" — <a href='login.html' class='ghost-link'>login</a> to track progress"}</span></div>
+        <div class="diff-bar rm-hero-bar"><span style="width:${pctAll}%"></span></div>
+        <div class="rm-chips">${["Easy","Medium","Hard"].map(d=>`<span class="rm-chip">${d} ${byDiff[d].s}/${byDiff[d].t}</span>`).join("")}</div>
+      </div>`;
       $("#steps").innerHTML=perStep.map(({step:s, matched:qs, missing},i)=>{
         const done=qs.filter(q=>solvedSet.has(q.id)).length;
         const pct=qs.length?Math.round(done/qs.length*100):0;
-        const list=qs.length?qs.map(qRow).join(""):'<span style="color:var(--muted);font-size:12px">Nothing here yet.</span>';
+        const status=pct>=100?"done":(done>0?"active":"todo");
+        const barCls=pct>=100?"easy":(done>0?"medium":"");
+        const icon=status==="done"?"✓":(status==="active"?"◐":"○");
+        if(status==="done") rmCollapsed.add(s.slug);
+        const collapsed=rmCollapsed.has(s.slug);
+        const list=qs.length?qs.map(qRow).join(""):'<div class="rm-empty">Nothing here yet.</div>';
         const missingRows=missing.length?missing.map(n=>`
-          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed var(--border);font-size:13px;flex-wrap:wrap">
-            <span style="color:var(--muted)">○ ${esc(n)}</span>
+          <div class="rm-missing">
+            <span class="rm-name">○ ${esc(n)}</span>
             <span class="badge ${esc(s.genDifficulty)}" style="font-size:11px">${esc(s.genDifficulty)}</span>
-            <span style="font-size:11px;color:var(--muted)">planned · ${esc(s.title)} · missing</span>
-            <button class="btn ghost gen-one" data-topic="${esc(n)}" data-diff="${esc(s.genDifficulty)}" data-tag="roadmap:${esc(s.slug)}" style="padding:4px 10px;font-size:12px;margin-left:auto" ${aiReady?"":"disabled title='AI not configured'"}>✨ Generate</button>
-          </div>`).join(""):'<div style="font-size:12px;color:#00b8a3;padding:6px 0">All planned questions present ✓</div>';
-        return `<div style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px">
-          <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
-            <span style="color:var(--muted);font-size:12px">Step ${i+1}</span>
-            <strong style="font-size:15px">${esc(s.title)}</strong>
-            <span style="color:var(--muted);font-size:12px;margin-left:auto">${done}/${qs.length} solved · ${missing.length} missing</span>
+            <span class="rm-plan">planned · ${esc(s.title)} · missing</span>
+            <button class="btn ghost gen-one" data-topic="${esc(n)}" data-diff="${esc(s.genDifficulty)}" data-tag="roadmap:${esc(s.slug)}" style="padding:4px 10px;font-size:12px" ${aiReady?"":"disabled title='AI not configured'"}>✨ Generate</button>
+          </div>`).join(""):'<div class="rm-complete">All planned questions present ✓</div>';
+        return `<div class="rm-step ${status}${collapsed?" collapsed":""}">
+          <button class="rm-head" data-slug="${esc(s.slug)}">
+            <span class="rm-status">${icon}</span>
+            <span class="rm-stepnum">Step ${i+1}</span>
+            <span class="rm-title">${esc(s.title)}</span>
+            <span class="rm-meta">${done}/${qs.length} solved · ${missing.length} missing</span>
+            <span class="rm-chev">▾</span>
+          </button>
+          <div class="rm-step-body">
+            <div class="rm-blurb">${esc(s.blurb)}</div>
+            <div class="diff-bar ${barCls}"><span style="width:${pct}%"></span></div>
+            <div>${list}</div>
+            <div style="margin-top:8px">${missingRows}</div>
           </div>
-          <div style="color:var(--muted);font-size:12px;margin:4px 0 8px">${esc(s.blurb)}</div>
-          <div class="diff-bar" style="margin-bottom:10px"><span style="width:${pct}%"></span></div>
-          <div>${list}</div>
-          <div style="margin-top:8px">${missingRows}</div>
         </div>`;
       }).join("");
-      document.querySelectorAll(".gen-one").forEach(b=>b.addEventListener("click",()=>generateOne(b)));
+      document.querySelectorAll(".rm-head").forEach(b=>b.addEventListener("click",()=>{
+        const slug=b.dataset.slug;
+        const card=b.closest(".rm-step");
+        if(!card) return;
+        card.classList.toggle("collapsed");
+        if(card.classList.contains("collapsed")) rmCollapsed.add(slug);
+        else rmCollapsed.delete(slug);
+      }));
+      document.querySelectorAll(".gen-one").forEach(b=>b.addEventListener("click",(ev)=>{ ev.stopPropagation(); generateOne(b); }));
     }
 
     async function generateOne(btn){
