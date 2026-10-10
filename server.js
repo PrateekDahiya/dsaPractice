@@ -1129,6 +1129,81 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ---------- Admin APIs ----------
+  if (pathname === "/api/admin/users" && req.method === "GET") {
+    const u = requireAdmin(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+      const q = (url.searchParams.get("q") || "").slice(0, 50);
+      return sendJson(res, await db.listUsers({ limit, offset, q }), 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname.match(/^\/api\/admin\/users\/\d+\/role$/) && req.method === "PUT") {
+    const u = requireAdmin(req, res);
+    if (!u) return;
+    const targetId = parseInt(pathname.split("/").filter(Boolean)[3], 10);
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { role } = JSON.parse(body || "{}");
+        if (!["user", "admin"].includes(role)) return sendJson(res, { error: "role must be user or admin" }, 400);
+        if (targetId === Number(u.id) && role !== "admin") {
+          return sendJson(res, { error: "You cannot demote yourself" }, 400);
+        }
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const ok = await db.setUserRole(targetId, role);
+        if (!ok) return sendJson(res, { error: "User not found" }, 404);
+        console.log(`Admin ${u.username} set user ${targetId} role=${role}`);
+        return sendJson(res, { ok: true, id: targetId, role }, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
+  if (pathname === "/api/admin/questions/stale-ai" && req.method === "DELETE") {
+    const u = requireAdmin(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      // ai-generated questions nobody ever solved (cap 50 per call)
+      let rows = [];
+      try {
+        [rows] = await db.getPool().query(
+          `SELECT q.id FROM questions q
+           LEFT JOIN (SELECT DISTINCT questionId FROM submissions WHERE passed=total AND mode='submit') s ON s.questionId=q.id
+           LEFT JOIN (SELECT DISTINCT questionId FROM manual_solved) m ON m.questionId=q.id
+           WHERE s.questionId IS NULL AND m.questionId IS NULL
+             AND JSON_CONTAINS(q.tags, '"ai-generated"', '$')
+           LIMIT 50`);
+      } catch {
+        [rows] = await db.getPool().query(
+          `SELECT q.id FROM questions q
+           LEFT JOIN (SELECT DISTINCT questionId FROM submissions WHERE passed=total AND mode='submit') s ON s.questionId=q.id
+           WHERE s.questionId IS NULL AND JSON_CONTAINS(q.tags, '"ai-generated"', '$')
+           LIMIT 50`);
+      }
+      const deleted = [];
+      for (const r of rows) {
+        try {
+          if (db.dbDeleteQuestion) await db.dbDeleteQuestion(r.id);
+          try { fs.unlinkSync(path.join(QUESTIONS_DIR, `${r.id}.json`)); } catch {}
+          try { questionCache.delete(r.id); } catch {}
+          deleted.push(r.id);
+        } catch (e) { console.warn("stale-ai delete skipped", r.id, e.message); }
+      }
+      cache.questions = null;
+      cache.leaderboard.clear();
+      console.log(`Admin ${u.username} pruned ${deleted.length} stale AI questions`);
+      return sendJson(res, { ok: true, deleted }, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+
   // ---------- Stats / Streaks / Leaderboard APIs ----------
   if (pathname === "/api/questions/solved" && req.method === "GET") {
     tryAuthenticate(req);

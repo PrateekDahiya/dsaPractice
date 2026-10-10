@@ -22,5 +22,35 @@ async function findUserByEmail(email) {
   const [rows] = await getPool().query(`SELECT * FROM users WHERE email=? LIMIT 1`, [email]);
   return rows[0] || null;
 }
+function publicUser(r) {
+  if (!r) return null;
+  return {
+    id: r.id, username: r.username, email: r.email || null, role: r.role || 'user',
+    avatar: r.avatar || null, bio: r.bio || null,
+    createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+  };
+}
+async function listUsers({ limit = 50, offset = 0, q = '' } = {}) {
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
+  const off = Math.max(parseInt(offset, 10) || 0, 0);
+  let rows;
+  if (q && String(q).trim()) {
+    const like = `%${String(q).trim().slice(0, 50)}%`;
+    [rows] = await getPool().query(
+      `SELECT id, username, email, role, avatar, createdAt FROM users WHERE username LIKE ? OR email LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [like, like, lim, off]);
+  } else {
+    [rows] = await getPool().query(
+      `SELECT id, username, email, role, avatar, createdAt FROM users ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [lim, off]);
+  }
+  const [[{ c }]] = await getPool().query(`SELECT COUNT(*) AS c FROM users`);
+  return { users: rows.map(publicUser), total: Number(c) || 0, limit: lim, offset: off };
+}
+async function setUserRole(id, role) {
+  if (!['user', 'admin'].includes(role)) throw new Error('role must be user or admin');
+  const [res] = await getPool().query(`UPDATE users SET role=? WHERE id=?`, [role, id]);
+  return res.affectedRows > 0;
+}
 
-module.exports = { createUser, findUserByUsername, findUserById, findUserByEmail };
+module.exports = { createUser, findUserByUsername, findUserById, findUserByEmail, publicUser, listUsers, setUserRole };
