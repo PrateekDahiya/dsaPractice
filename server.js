@@ -33,13 +33,100 @@ let dbReady = false;
 let useDb = !!db;
 let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
 // ---------- lint guards: single-flight + cache + rate limit (OOM fix for /api/lint) ----------
-const lintStats = { total: 0, cacheHits: 0, rateLimited: 0 };
+const lintStats = { total: 0, cacheHits: 0, rateLimited: 0, execRejected: 0 };
 let lintInflightCpp = 0; // max 1 concurrent g++ lint process
 const lintCache = new Map(); // sha256(code+language) -> { diagnostics, ts }
 const LINT_CACHE_TTL_MS = 60 * 1000;
-const LINT_CACHE_MAX = 200;
+const LINT_CACHE_MAX = parseInt(process.env.LINT_CACHE_MAX || "100", 10) || 100;
 const lintRate = new Map(); // ip -> lastAcceptedMs
 const LINT_MIN_GAP_MS = 1200;
+// ---------- global execution gate (free-tier OOM fix: max 1 g++ at a time) ----------
+const EXEC_MAX_CPP = parseInt(process.env.EXEC_MAX_CPP || "1", 10) || 1;
+const EXEC_MAX_PYTHON = parseInt(process.env.EXEC_MAX_PYTHON || "2", 10) || 2;
+const EXEC_MAX_TOTAL = parseInt(process.env.EXEC_MAX_TOTAL || "3", 10) || 3;
+let execInflightCpp = 0, execInflightPython = 0, execInflightTotal = 0;
+const DISABLE_CPP = process.env.DISABLE_CPP === "1";
+const ENABLE_PCH = process.env.ENABLE_PCH === "1";
+const MAX_BODY_BYTES = 60000;
+const MAX_CHILD_BYTES = 65536; // cap stdout/stderr buffering per child process
+function execTryAcquire(kind) {
+  if (execInflightTotal >= EXEC_MAX_TOTAL) return false;
+  if (kind === "cpp" && execInflightCpp >= EXEC_MAX_CPP) return false;
+  if (kind === "python" && execInflightPython >= EXEC_MAX_PYTHON) return false;
+  execInflightTotal++;
+  if (kind === "cpp") execInflightCpp++;
+  if (kind === "python") execInflightPython++;
+  return true;
+}
+function execRelease(kind) {
+  execInflightTotal = Math.max(0, execInflightTotal - 1);
+  if (kind === "cpp") execInflightCpp = Math.max(0, execInflightCpp - 1);
+  if (kind === "python") execInflightPython = Math.max(0, execInflightPython - 1);
+}
+// Sweep stale rate-limit entries so per-IP maps can't grow forever (slow leak/DoS).
+setInterval(() => {
+  try {
+    const now = Date.now();
+    for (const [m, ttl] of [[lintRate, LINT_MIN_GAP_MS * 10], [compRate, COMP_MIN_GAP_MS * 2], [genRate, GEN_MIN_GAP_MS * 2]]) {
+      if (m.size > 1000) {
+        for (const [k, v] of m) { if (now - v > ttl) m.delete(k); if (m.size <= 1000) break; }
+      } else {
+        for (const [k, v] of m) if (now - v > ttl) m.delete(k);
+      }
+    }
+    if (cache.leaderboard.size > 100) cache.leaderboard.clear();
+  } catch {}
+}, 60000).unref();
+// Per-question detail cache (avoids re-read + re-parse of all files per execute).
+const questionCache = new Map(); // id -> { q, ts }
+const QUESTION_CACHE_TTL_MS = 30 * 1000;
+const QUESTION_CACHE_MAX = 100;
+function questionCacheGet(id) {
+  const e = questionCache.get(id);
+  if (!e) return null;
+  if (Date.now() - e.ts > QUESTION_CACHE_TTL_MS) { try { questionCache.delete(id); } catch {} return null; }
+  return e.q;
+}
+function questionCacheSet(id, q) {
+  try {
+    if (!questionCache.has(id) && questionCache.size >= QUESTION_CACHE_MAX) {
+      const oldest = questionCache.keys().next().value;
+      if (oldest !== undefined) questionCache.delete(oldest);
+    }
+    questionCache.set(id, { q, ts: Date.now() });
+  } catch {}
+}
+// Bounded C++ exe cache: max N exes + TTL eviction (old code never deleted).
+const EXE_CACHE_MAX = parseInt(process.env.EXE_CACHE_MAX || "20", 10) || 20;
+const EXE_CACHE_TTL_MS = 10 * 60 * 1000;
+function exeCacheDir() {
+  const d = path.join(os.tmpdir(), "dsa_cache");
+  try { fs.mkdirSync(d, { recursive: true }); } catch {}
+  return d;
+}
+function exeCachePrune() {
+  try {
+    const d = path.join(os.tmpdir(), "dsa_cache");
+    if (!fs.existsSync(d)) return;
+    const files = fs.readdirSync(d).map(f => {
+      const fp = path.join(d, f);
+      try { return { fp, mt: fs.statSync(fp).mtimeMs }; } catch { return null; }
+    }).filter(Boolean).sort((a, b) => a.mt - b.mt);
+    const now = Date.now();
+    for (const f of files) {
+      if (now - f.mt > EXE_CACHE_TTL_MS) { try { fs.unlinkSync(f.fp); } catch {} }
+    }
+    const rest = fs.readdirSync(d);
+    if (rest.length > EXE_CACHE_MAX) {
+      rest.map(f => {
+        const fp = path.join(d, f);
+        try { return { fp, mt: fs.statSync(fp).mtimeMs }; } catch { return null; }
+      }).filter(Boolean).sort((a, b) => a.mt - b.mt)
+        .slice(0, rest.length - EXE_CACHE_MAX)
+        .forEach(f => { try { fs.unlinkSync(f.fp); } catch {} });
+    }
+  } catch {}
+}
 function lintCacheKey(code, language) {
   return crypto.createHash("sha256").update(language + "\0" + code).digest("hex");
 }
@@ -91,15 +178,26 @@ function hasTimeV() {
   return _hasTimeV;
 }
 // run an exe, tracking peak RSS via /usr/bin/time -v when present (Linux); resolves {out, memKb}
+// NOTE: stdout/stderr capped at MAX_CHILD_BYTES so a runaway program can't OOM Node.
+// Set USE_TIME_V=0 to skip the extra /usr/bin/time fork on low-memory boxes.
 function runExeTracked(exe, args, env, timeoutMs, tmsg) {
   return new Promise((resolve, reject) => {
-    const useTime = hasTimeV();
+    const useTime = process.env.USE_TIME_V === "0" ? false : hasTimeV();
     const child = useTime
       ? spawn("/usr/bin/time", ["-v", exe, ...(args || [])], { env })
       : spawn(exe, args || [], { env });
-    let out = "", err = "";
-    child.stdout.on("data", d => out += d);
-    child.stderr.on("data", d => err += d);
+    let out = "", err = "", truncated = false;
+    const cap = (s, chunk) => {
+      if (truncated) return s;
+      if (s.length + chunk.length > MAX_CHILD_BYTES) {
+        truncated = true;
+        try { child.kill(); } catch {}
+        return s + chunk.slice(0, Math.max(0, MAX_CHILD_BYTES - s.length));
+      }
+      return s + chunk;
+    };
+    child.stdout.on("data", d => { out = cap(out, d.toString()); });
+    child.stderr.on("data", d => { err = cap(err, d.toString()); });
     const killTimer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error(tmsg || "Time Limit Exceeded")); }, timeoutMs || 3500);
     child.on("close", c => {
       clearTimeout(killTimer);
@@ -123,7 +221,7 @@ const compRate = new Map(); // ip -> lastAcceptedMs
 const COMP_MIN_GAP_MS = 60000;
 const compCache = new Map(); // sha256(question+lang+code) -> { est, ts }
 const COMP_CACHE_TTL_MS = 3600 * 1000;
-const COMP_CACHE_MAX = 200;
+const COMP_CACHE_MAX = parseInt(process.env.COMP_CACHE_MAX || "50", 10) || 50;
 function compCacheGet(key) {
   const e = compCache.get(key);
   if (!e) return null;
@@ -243,14 +341,19 @@ async function loadQuestions() {
   return loadQuestionsSync();
 }
 async function getQuestionById(id) {
+  const cached = questionCacheGet(id);
+  if (cached) return cached;
+  let q = null;
   if (useDb) {
     await ensureDb();
     if (dbReady) {
-      const q = await db.dbGetQuestion(id);
-      if (q) return q;
+      q = await db.dbGetQuestion(id);
+      if (q) { questionCacheSet(id, q); return q; }
     }
   }
-  return loadQuestionsSync().find(x => x.id === id) || null;
+  q = loadQuestionsSync().find(x => x.id === id) || null;
+  if (q) questionCacheSet(id, q);
+  return q;
 }
 
 // ---------- shared question validation + persistence (used by manual + AI add) ----------
@@ -310,6 +413,7 @@ async function persistQuestion(q, u) {
     console.log(`Created ${filePath}`);
   }
   cache.questions = null; // invalidate
+  try { questionCache.delete(q.id); } catch {}
   cache.leaderboard.clear();
   return { savedToDb };
 }
@@ -554,9 +658,10 @@ int main(){
     ];
     let compiler = "g++";
     for (const p of localGpps) if (fs.existsSync(p)) { compiler = p; break; }
-    const compile = spawn(compiler, ["-std=c++17", "-O2", tmpCpp, "-o", exe]);
+    // Low-memory flags: -O0 uses far less RAM than -O2; -s strips symbols (smaller exe).
+    const compile = spawn(compiler, ["-std=c++17", "-O0", "-s", tmpCpp, "-o", exe]);
     let cErr = "";
-    compile.stderr.on("data", d => cErr += d);
+    compile.stderr.on("data", d => { if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
     compile.on("error", err => {
       try { fs.unlinkSync(tmpCpp); } catch {}
       if (err.code === "ENOENT") return reject(new Error("g++ not found. No bundled compiler at tools/w64devkit/bin/g++.exe and no system g++. Run setup-cpp.ps1 to bundle it (downloads portable w64devkit into project, no admin/PATH needed) OR install MinGW system-wide: https://code.visualstudio.com/docs/cpp/config-mingw"));
@@ -736,8 +841,8 @@ int main(){
   const localGpps = [path.join(ROOT,"tools","mingw64","bin","g++.exe"),path.join(ROOT,"tools","w64devkit","bin","g++.exe"),path.join(ROOT,"tools","gcc","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","C:\\tools\\mingw64\\bin\\g++.exe","C:\\tools\\w64devkit\\bin\\g++.exe"];
   let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
   return new Promise((resolve, reject) => {
-    const compile = spawn(compiler, ["-std=c++17","-O0",tmpCpp,"-o",exe]);
-    let cErr=""; compile.stderr.on("data",d=>cErr+=d);
+    const compile = spawn(compiler, ["-std=c++17","-O0","-s",tmpCpp,"-o",exe]);
+    let cErr=""; compile.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
     compile.on("error", err=>{ try{fs.unlinkSync(tmpCpp);}catch{}; if(err.code==="ENOENT") return reject(new Error("g++ not found")); reject(new Error("Compile spawn error: "+err.message)); });
     compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
       const binDir=path.dirname(compiler); const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
@@ -861,7 +966,8 @@ const server = http.createServer(async (req, res) => {
       heapMB: +(mem.heapUsed / 1048576).toFixed(1),
       rssMB: +(mem.rss / 1048576).toFixed(1),
       uptimeSec: Math.floor(process.uptime()),
-      lint: { inflight: lintInflightCpp, total: lintStats.total, cacheHits: lintStats.cacheHits, rateLimited: lintStats.rateLimited }
+      lint: { inflight: lintInflightCpp, total: lintStats.total, cacheHits: lintStats.cacheHits, rateLimited: lintStats.rateLimited },
+      exec: { cpp: execInflightCpp, python: execInflightPython, total: execInflightTotal, rejected: lintStats.execRejected, cppDisabled: DISABLE_CPP }
     }, 200);
   }
 
@@ -1404,15 +1510,31 @@ const server = http.createServer(async (req, res) => {
   }
   // Streaming execute — sends each test case as it finishes (SSE-like NDJSON)
   if (pathname === "/api/execute/stream" && req.method === "POST") {
+    const cl = parseInt(req.headers["content-length"] || "0", 10);
+    if (cl > MAX_BODY_BYTES) { res.writeHead(413, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Request body too large"})); }
     let body = "";
-    req.on("data", chunk => body += chunk);
+    let bodyTooLarge = false;
+    req.on("data", chunk => {
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) { bodyTooLarge = true; try { req.destroy(); } catch {} }
+    });
     req.on("end", async () => {
+      let gateKind = null, held = false;
       try {
+        if (bodyTooLarge) { res.writeHead(413, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Request body too large"})); }
         const { questionId, code, language, mode } = JSON.parse(body || "{}");
         if (!questionId || !code || !language || !mode) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Missing fields"})); }
         if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"bad request"})); }
+        if (language === "cpp" && DISABLE_CPP) { res.writeHead(503, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"C++ execution disabled on this instance (low memory). Use JavaScript or Python."})); }
+        gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
+        if (gateKind && !execTryAcquire(gateKind)) {
+          lintStats.execRejected++;
+          res.writeHead(429, {"Content-Type":"application/json"});
+          return res.end(JSON.stringify({error:"Server busy: another run is compiling. Retry shortly."}));
+        }
+        held = !!gateKind;
         const q = await getQuestionById(questionId);
-        if (!q) { res.writeHead(404, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Question not found"})); }
+        if (!q) { if (held) execRelease(gateKind); held = false; res.writeHead(404, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Question not found"})); }
         const visible = q.visibleTestCases.map(tc=>({...tc,_hidden:false}));
         const hidden = q.hiddenTestCases.map(tc=>({...tc,_hidden:true}));
         q._testCasesForMode = mode==="run"?visible:[...visible,...hidden];
@@ -1423,6 +1545,16 @@ const server = http.createServer(async (req, res) => {
         // For JS, per-case is already fast. For cpp/python batch, we still get all at once, so we simulate streaming by iterating after batch.
         // To keep streaming granular, we run per-case sequentially and flush each.
         let passed=0, streamMemKb=null;
+        // Kill in-flight children if the client disconnects mid-stream (no orphans).
+        const activeKids = new Set();
+        const untrack = (k) => { try { activeKids.delete(k); } catch {} };
+        try {
+          req.on("close", () => {
+            if (!res.writableEnded) {
+              for (const k of activeKids) { try { k.kill(); } catch {} }
+            }
+          });
+        } catch {}
         const sendOne = (tc, actual, error, timeMs, memKb) => {
           const ok = !error && deepEqual(actual, tc.expectedOutput, q.id);
           if(ok) passed++;
@@ -1450,15 +1582,17 @@ const server = http.createServer(async (req, res) => {
             else driver = `\nimport json\ncases=json.loads('''${casesJson.replace(/'/g,"\\'")}''')\nfor tc in cases:\n    _ret=${fnName}(**tc["input"])\n    print(json.dumps(_ret), flush=True)\n`;
             fs.writeFileSync(tmpFile, code+"\n"+driver+PY_PEAK_TAIL, "utf8");
             const py = spawn("python", [tmpFile]);
-            let stderr=""; py.stderr.on("data",d=>stderr+=d);
+            activeKids.add(py);
+            let stderr=""; py.stderr.on("data",d=>{ if (stderr.length < MAX_CHILD_BYTES) stderr += d.toString().slice(0, MAX_CHILD_BYTES - stderr.length); });
             py.on("error", async()=>{ try{ const py3=spawn("python3",[tmpFile]); let out=""; py3.stdout.on("data",d=>{ const lines=d.toString().split("\n").filter(Boolean); for(const line of lines){ const t=line.trim(); if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); continue; } try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch{} } }); py3.on("close",c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(c!==0) for(const tc of testCases) sendOne(tc,null,"python3 error "+c,0,null); }); }catch{} });
             let outBuf=""; py.stdout.on("data", d=>{
               outBuf+=d.toString();
+              if (outBuf.length > MAX_CHILD_BYTES * 2) outBuf = outBuf.slice(-MAX_CHILD_BYTES);
               let lines=outBuf.split("\n");
               outBuf=lines.pop();
               for(const line of lines){ const t=line.trim(); if(!t) continue; if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); continue; } try{ const actual=JSON.parse(line); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch(e){} }
             });
-            await new Promise((res,rej)=>{ py.on("close", c=>{ try{fs.unlinkSync(tmpFile);}catch{}; if(outBuf.trim()){ const t=outBuf.trim(); if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); } else { try{ const actual=JSON.parse(t); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch{} } } if(c!==0 && c!==null) { /* already handled */ } res(); }); py.on("error", rej); });
+            await new Promise((res,rej)=>{ py.on("close", c=>{ untrack(py); try{fs.unlinkSync(tmpFile);}catch{}; if(outBuf.trim()){ const t=outBuf.trim(); if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); } else { try{ const actual=JSON.parse(t); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch{} } } if(c!==0 && c!==null) { /* already handled */ } res(); }); py.on("error", (e)=>{ untrack(py); rej(e); }); });
           }catch(e){ for(const tc of testCases) sendOne(tc, null, e.message, 0, null); }
         } else if (language==="cpp") {
           // Compile once, then stream each case as exe prints (endl flushes)
@@ -1489,8 +1623,7 @@ const server = http.createServer(async (req, res) => {
             }
             const crypto = require("crypto");
             const hash = crypto.createHash("sha256").update(code+"|"+q.id+"|"+mode+"|v2-index").digest("hex").slice(0,16);
-            const cacheDir = path.join(os.tmpdir(), "dsa_cache");
-            try{fs.mkdirSync(cacheDir,{recursive:true});}catch{}
+            const cacheDir = exeCacheDir();
             const exe=path.join(cacheDir, `dsa_${hash}.exe`);
             const tmpCpp=path.join(os.tmpdir(), `dsa_stream_${Date.now()}_${Math.random().toString(36).slice(2)}.cpp`);
             const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","C:\\tools\\mingw64\\bin\\g++.exe","g++"];
@@ -1500,9 +1633,9 @@ const server = http.createServer(async (req, res) => {
               fs.writeFileSync(tmpCpp, header+"\n"+code+"\n"+printHelpers+"\n"+driver, "utf8");
               let cErr="";
               await new Promise((res,rej)=>{
-                const comp=spawn(compiler, ["-std=c++17","-O0",tmpCpp,"-o",exe]);
-                comp.stderr.on("data",d=>cErr+=d);
-                comp.on("close",c=>c===0?res():rej(new Error("Compile Error:\\n"+cErr)));
+                const comp=spawn(compiler, ["-std=c++17","-O0","-s",tmpCpp,"-o",exe]);
+                comp.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
+                comp.on("close",c=>{ exeCachePrune(); c===0?res():rej(new Error("Compile Error:\\n"+cErr)); });
                 comp.on("error",e=>rej(new Error("Compile spawn error: "+e.message)));
               });
               try{fs.unlinkSync(tmpCpp);}catch{}
@@ -1511,13 +1644,15 @@ const server = http.createServer(async (req, res) => {
             }
             const binDir=path.dirname(compiler);
             const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
-            const useTime=hasTimeV();
+            const useTime=process.env.USE_TIME_V === "0" ? false : hasTimeV();
             const run=useTime?spawn("/usr/bin/time",["-v",exe],{env: runEnv}):spawn(exe, [], {env: runEnv});
+            activeKids.add(run);
             let outBuf="", rErr="";
             let idx=0;
             const t0=Date.now();
             run.stdout.on("data", d=>{
               outBuf+=d.toString();
+              if (outBuf.length > MAX_CHILD_BYTES * 2) outBuf = outBuf.slice(-MAX_CHILD_BYTES);
               let lines=outBuf.split("\n");
               outBuf=lines.pop();
               for(const line of lines){
@@ -1529,11 +1664,12 @@ const server = http.createServer(async (req, res) => {
                 }catch{}
               }
             });
-            run.stderr.on("data",d=>rErr+=d);
+            run.stderr.on("data",d=>{ if (rErr.length < MAX_CHILD_BYTES) rErr += d.toString().slice(0, MAX_CHILD_BYTES - rErr.length); });
             await new Promise((res,rej)=>{
               const kill=setTimeout(()=>{try{run.kill();}catch{}; rej(new Error("Time Limit Exceeded"));},8000);
               run.on("close",c=>{
                 clearTimeout(kill);
+                untrack(run);
                 if(useTime){ const m=rErr.match(/Maximum resident set size \(kbytes\):\s*(\d+)/); if(m) streamMemKb=Math.max(streamMemKb||0,parseInt(m[1],10)); }
                 if(outBuf.trim() && idx<testCases.length){
                   try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases[idx++]; if(tc) sendOne(tc, actual, null, Date.now()-t0, null); }catch{}
@@ -1545,7 +1681,7 @@ const server = http.createServer(async (req, res) => {
                 }
                 res();
               });
-              run.on("error",rej);
+              run.on("error",(e)=>{ clearTimeout(kill); untrack(run); rej(e); });
             });
           }catch(e){
             for(const tc of testCases) sendOne(tc, null, e.message, 0, null);
@@ -1554,25 +1690,41 @@ const server = http.createServer(async (req, res) => {
         res.write(`event: done\ndata: ${JSON.stringify({passed, total:testCases.length, memKb: streamMemKb})}\n\n`);
         res.end();
       } catch(e){ try{ res.writeHead(500, {"Content-Type":"application/json"}); res.end(JSON.stringify({error:e.message})); }catch{} }
+      finally { if (held) execRelease(gateKind); }
     });
     return;
   }
   // Per-testcase API — UI calls once per case, renders immediately without waiting for all
   if (pathname === "/api/execute/case" && req.method === "POST") {
+    const cl = parseInt(req.headers["content-length"] || "0", 10);
+    if (cl > MAX_BODY_BYTES) return sendJson(res, { error: "Request body too large" }, 413);
     let body = "";
-    req.on("data", chunk => body += chunk);
+    let bodyTooLarge = false;
+    req.on("data", chunk => {
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) { bodyTooLarge = true; try { req.destroy(); } catch {} }
+    });
     req.on("end", async () => {
+      let gateKind = null, held = false;
       try {
+        if (bodyTooLarge) return sendJson(res, { error: "Request body too large" }, 413);
         const { questionId, code, language, mode, index } = JSON.parse(body || "{}");
         if (!questionId || !code || !language || !mode || index===undefined) return sendJson(res, { error: "Missing fields: questionId, code, language, mode, index" }, 400);
         if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) return sendJson(res, { error: "bad request" }, 400);
+        if (language === "cpp" && DISABLE_CPP) return sendJson(res, { error: "C++ execution disabled on this instance (low memory). Use JavaScript or Python." }, 503);
+        gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
+        if (gateKind && !execTryAcquire(gateKind)) {
+          lintStats.execRejected++;
+          return sendJson(res, { error: "Server busy: another run is compiling. Retry shortly." }, 429);
+        }
+        held = !!gateKind;
         const q = await getQuestionById(questionId);
-        if (!q) return sendJson(res, { error: "Question not found" }, 404);
+        if (!q) { if (held) execRelease(gateKind); return sendJson(res, { error: "Question not found" }, 404); }
         const visible = q.visibleTestCases.map(tc=>({...tc,_hidden:false}));
         const hidden = (q.hiddenTestCases||[]).map(tc=>({...tc,_hidden:true}));
         const all = mode==="run"?visible:[...visible,...hidden];
         const tc = all[index];
-        if (!tc) return sendJson(res, { error: "bad index" }, 400);
+        if (!tc) { if (held) execRelease(gateKind); return sendJson(res, { error: "bad index" }, 400); }
         const start = Date.now();
         let actual=null, error=null, ok=false, memKb=null;
         try{
@@ -1582,8 +1734,7 @@ const server = http.createServer(async (req, res) => {
             // reuse cached batch exe with index arg (compile once, run single)
             const crypto=require("crypto");
             const hash=crypto.createHash("sha256").update(code+"|"+q.id+"|"+mode+"|v2-index").digest("hex").slice(0,16);
-            const cacheDir=path.join(os.tmpdir(),"dsa_cache");
-            try{fs.mkdirSync(cacheDir,{recursive:true});}catch{}
+            const cacheDir=exeCacheDir();
             const exe=path.join(cacheDir,`dsa_${hash}.exe`);
             if(!fs.existsSync(exe)){
               // compile batch exe on-demand (same driver as stream, with index support)
@@ -1606,7 +1757,7 @@ const server = http.createServer(async (req, res) => {
               const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","g++"];
               let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
               let cErr="";
-              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0",tmpCpp,"-o",exe]); c.stderr.on("data",d=>cErr+=d); c.on("close",cc=>cc===0?rs():rj(new Error("Compile Error:\\n"+cErr))); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
+              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error("Compile Error:\\n"+cErr)); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
               try{fs.unlinkSync(tmpCpp);}catch{}
             }
             const binDir=path.dirname(fs.existsSync("C:\\mingw64\\bin\\g++.exe")?"C:\\mingw64\\bin\\g++.exe":"g++");
@@ -1619,15 +1770,16 @@ const server = http.createServer(async (req, res) => {
           } else throw new Error("bad lang");
           ok=deepEqual(actual, tc.expectedOutput, q.id);
         }catch(e){ error=e.message; if(String(e.message).includes("Script execution timed out")) error="Time Limit Exceeded (JS >2s)"; }
+        if (held) execRelease(gateKind);
         return sendJson(res, { testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual: error?null:actual, error, hidden: !!tc._hidden, timeMs: Date.now()-start, memKb, index }, 200);
-      }catch(e){ return sendJson(res, { error: e.message }, 500); }
+      }catch(e){ if (held && gateKind) execRelease(gateKind); return sendJson(res, { error: e.message }, 500); }
     });
     return;
   }
   if (pathname === "/api/lint" && req.method === "POST") {
     let body = "";
     let rawTooLarge = false;
-    req.on("data", chunk => { body += chunk; if (body.length > 60000) rawTooLarge = true; });
+    req.on("data", chunk => { body += chunk; if (body.length > MAX_BODY_BYTES) { rawTooLarge = true; try { req.destroy(); } catch {} } });
     req.on("end", async () => {
       try {
         if (rawTooLarge) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
@@ -1636,7 +1788,7 @@ const server = http.createServer(async (req, res) => {
         if (!["javascript", "python", "cpp"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
         lintStats.total++;
-        // Result cache (TTL 60s, cap 200): check BEFORE rate-limit and single-flight gates
+        // Result cache: check BEFORE rate-limit and single-flight gates
         // so repeats are fast and do not consume rate budget or g++ slots.
         const key = lintCacheKey(code, language);
         const cached = lintCacheGet(key);
@@ -1699,22 +1851,45 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
   }
   if (pathname === "/api/execute" && req.method === "POST") {
+    // Early Content-Length guard (cheap, before buffering).
+    const cl = parseInt(req.headers["content-length"] || "0", 10);
+    if (cl > MAX_BODY_BYTES) { return sendJson(res, { error: "Request body too large" }, 413); }
     let body = "";
-    req.on("data", chunk => body += chunk);
+    let bodyTooLarge = false;
+    req.on("data", chunk => {
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) { bodyTooLarge = true; try { req.destroy(); } catch {} }
+    });
     req.on("end", async () => {
       try {
+        if (bodyTooLarge) return sendJson(res, { error: "Request body too large" }, 413);
         const { questionId, code, language, mode } = JSON.parse(body || "{}");
         if (!questionId || !code || !language || !mode) return sendJson(res, { error: "Missing fields: questionId, code, language, mode" }, 400);
         if (!["run","submit"].includes(mode)) return sendJson(res, { error: "mode must be run or submit" }, 400);
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "language must be javascript, python or cpp" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
-        const q = await getQuestionById(questionId);
-        if (!q) return sendJson(res, { error: "Question not found" }, 404);
-        const visible = q.visibleTestCases.map(tc => ({ ...tc, _hidden: false }));
-        const hidden = (q.hiddenTestCases||[]).map(tc => ({ ...tc, _hidden: true }));
-        q._testCasesForMode = mode === "run" ? visible : [...visible, ...hidden];
-        const result = await executeQuestion(q, code, language);
-        return sendJson(res, { mode, ...result });
+        if (language === "cpp" && DISABLE_CPP) return sendJson(res, { error: "C++ execution disabled on this instance (low memory). Use JavaScript or Python." }, 503);
+        // Global execution gate: bounds concurrent g++/python so free-tier RAM can't OOM.
+        const gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
+        let held = false;
+        if (gateKind) {
+          if (!execTryAcquire(gateKind)) {
+            lintStats.execRejected++;
+            return sendJson(res, { error: "Server busy: another run is compiling. Retry shortly." }, 429);
+          }
+          held = true;
+        }
+        try {
+          const q = await getQuestionById(questionId);
+          if (!q) return sendJson(res, { error: "Question not found" }, 404);
+          const visible = q.visibleTestCases.map(tc => ({ ...tc, _hidden: false }));
+          const hidden = (q.hiddenTestCases||[]).map(tc => ({ ...tc, _hidden: true }));
+          q._testCasesForMode = mode === "run" ? visible : [...visible, ...hidden];
+          const result = await executeQuestion(q, code, language);
+          return sendJson(res, { mode, ...result });
+        } finally {
+          if (held) execRelease(gateKind);
+        }
       } catch (e) {
         console.error(e);
         return sendJson(res, { error: e.message }, 500);
@@ -1758,22 +1933,47 @@ server.listen(PORT, async () => {
   const qs = await loadQuestions();
   console.log(`DSA Practice running at http://localhost:${PORT}`);
   console.log(`Questions: ${qs.length} loaded from ${useDb && dbReady ? "MySQL "+process.env.DB_HOST : QUESTIONS_DIR}`);
-  // warm g++ (Hikari-like: keep compiler ready, 2 workers conceptually)
+  console.log(`Memory guards: heap cap via NODE_OPTIONS, exec gate cpp<=${EXEC_MAX_CPP} py<=${EXEC_MAX_PYTHON} total<=${EXEC_MAX_TOTAL}, PCH ${ENABLE_PCH ? "on" : "off"}, C++ ${DISABLE_CPP ? "disabled" : "enabled"}`);
+  // Lightweight g++ presence check only (no warm compile, no worker pool — saves RAM).
   try{
     const { spawn: _sp } = require("child_process");
-    const _c = _sp("C:\\mingw64\\bin\\g++.exe", ["--version"]);
-    _c.on("close",()=>console.log("g++ warmed (C:\\mingw64)"));
-    _c.on("error",()=>{ const _c2=_sp("g++",["--version"]); _c2.on("close",()=>console.log("g++ warmed (PATH)")); });
+    const _c = _sp("g++", ["--version"]);
+    let _done = false;
+    _c.on("close",(code)=>{ if(_done) return; _done=true; if(code===0) console.log("g++ available (PATH)"); else console.warn("g++ check exit "+code+" — C++ execution may fail; set DISABLE_CPP=1 for JS/Python-only mode"); });
+    _c.on("error",()=>{ if(_done) return; _done=true; console.warn("g++ not found in PATH — C++ execution will fail; set DISABLE_CPP=1 for JS/Python-only mode"); });
   }catch{}
-  try{ const { getCompilePool } = require("./server/utils/compilePool"); getCompilePool(); }catch(e){ console.warn("compile pool warmup skipped", e.message); }
   // Precompiled bits header for lint (non-blocking, failures swallowed).
   // Generates <os.tmpdir()>/dsa_pch/bits/stdc++.h.gch once so per-keystroke
   // g++ -fsyntax-only parses far less and uses far less RAM.
-  try {
-    const { ensureBitsPch } = require("./server/utils/lint");
-    ensureBitsPch(ROOT).then(
-      (p) => { if (p) console.log("PCH ready:", p); },
-      () => {}
-    );
-  } catch {}
+  // Disabled by default on low-memory hosts (ENABLE_PCH=1 to opt in).
+  if (ENABLE_PCH) {
+    try {
+      const { ensureBitsPch } = require("./server/utils/lint");
+      ensureBitsPch(ROOT).then(
+        (p) => { if (p) console.log("PCH ready:", p); },
+        () => {}
+      );
+    } catch {}
+  } else {
+    console.log("PCH skipped (ENABLE_PCH=0) — lint uses plain -fsyntax-only");
+  }
 });
+
+// Graceful shutdown (Render sends SIGTERM on deploy/spin-down): stop accepting,
+// close the server + DB pool so in-flight compiles aren't orphaned mid-write.
+function shutdown(signal) {
+  console.log(`${signal} received — draining...`);
+  try {
+    server.close(() => {
+      try {
+        if (db && db.getPool) {
+          db.getPool().end().catch(() => {}).finally(() => process.exit(0));
+          setTimeout(() => process.exit(0), 5000).unref();
+        } else process.exit(0);
+      } catch { process.exit(0); }
+    });
+    setTimeout(() => process.exit(0), 10000).unref();
+  } catch { process.exit(0); }
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

@@ -131,10 +131,10 @@ async function initDb() {
     const { seedMethodDocs } = require('./methods');
     await seedMethodDocs();
   } catch (e) { console.warn('method docs seed skipped', e.message); }
-  // Hikari-like warmup: pre-create 3 idle connections
+  // Low-memory warmup: 1 idle connection (DB_POOL_MAX bounds the pool).
   try {
     const { warmPool } = require('./pool');
-    await warmPool(3);
+    await warmPool(parseInt(process.env.DB_POOL_WARM || '1', 10) || 1);
   } catch (e) { console.warn('pool warmup skipped', e.message); }
   console.log('DB: questions, users, bookmarks, code_saves, submissions ready (pool warmed)');
   return pool;

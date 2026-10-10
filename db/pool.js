@@ -1,5 +1,10 @@
 const mysql = require('mysql2/promise');
 
+function poolMax() {
+  const n = parseInt(process.env.DB_POOL_MAX || '2', 10);
+  return Math.min(Math.max(isNaN(n) ? 2 : n, 1), 5);
+}
+
 function getConfig() {
   if (!process.env.DB_HOST || !process.env.DB_USERNAME || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
     throw new Error('Missing DB env: DB_HOST, DB_USERNAME, DB_PASSWORD, DB_NAME required (see .env)');
@@ -12,7 +17,7 @@ function getConfig() {
     database: process.env.DB_NAME,
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
     waitForConnections: true,
-    connectionLimit: 5,
+    connectionLimit: poolMax(),
     queueLimit: 0,
   };
 }
@@ -30,8 +35,8 @@ function getPool() {
   }
   return pool;
 }
-// Hikari-style warmup: create 5 connections on start and keep them idle
-async function warmPool(minIdle = 3) {
+// Low-memory warmup: 1 idle connection by default (override via warmPool(n)).
+async function warmPool(minIdle = 1) {
   const p = getPool();
   if (warmed) return;
   warmed = true;

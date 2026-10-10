@@ -385,10 +385,11 @@
 
   function scheduleLint() {
     try { clearTimeout(lintTimer); } catch (e) {}
-    lintTimer = setTimeout(runLint, 1200); /* aligned with server 1200ms lint rate limit */
+    lintTimer = setTimeout(runLint, 2000); /* low-memory: fewer g++ lint forks */
   }
 
   function runLint() {
+    try { if (document.hidden) { scheduleLint(); return; } } catch (e) {}
     var code = ta.value;
     if (!code || !code.trim() || code.length > 50000) {
       diags = [];
