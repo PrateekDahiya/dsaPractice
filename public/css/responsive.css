@@ -1,0 +1,12 @@
+/* responsive.css — split from style.css. mobile breakpoints (must load last). Load order: base, layout, editor, components, pages, responsive. */
+
+@media (max-width: 900px) {
+  .container { flex-direction: column; overflow-y: auto; }
+  .sidebar { width: 100% !important; max-height: 60vh; }
+  .sidebar.hidden { display: none; transform: none; width: 100% !important; }
+  .main { flex-direction: column; }
+  .problem-pane { border-right: none; border-bottom: 1px solid var(--border); }
+  .editor-pane { min-width: 0; }
+  .resizer { display: none; }
+  body { overflow: auto; height: auto; }
+}

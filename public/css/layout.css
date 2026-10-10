@@ -1,10 +1,79 @@
-/* layout.css — sidebar, main, problem-pane, resizers */
+/* layout.css — split from style.css. container, sidebar, question list, resizers, main, problem pane, tabs. Load order: base, layout, editor, components, pages, responsive. */
 .container { display: flex; flex: 1; min-height: 0; position: relative; }
-.sidebar { width: 280px; min-width: 200px; max-width: 420px; border-right: 1px solid var(--border); background: #13151b; display: flex; flex-direction: column; flex-shrink: 0; transition: transform 0.2s ease, width 0.2s ease, opacity 0.2s ease; overflow: hidden; }
+.sidebar {
+  width: 280px;
+  min-width: 200px;
+  max-width: 420px;
+  border-right: 1px solid var(--border);
+  background: #13151b;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: transform 0.2s ease, width 0.2s ease, opacity 0.2s ease;
+  overflow: hidden;
+}
 .sidebar.hidden { width: 0; min-width: 0; max-width: 0; opacity: 0; border-right: none; transform: translateX(-100%); pointer-events: none; }
 .sidebar-overlay { display: none; }
+.sidebar-header {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sidebar-header h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+.sidebar-header select, .editor-header select {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.question-list { flex: 1; overflow-y: auto; padding: 8px; }
+.question-item {
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.question-item:hover { background: var(--panel2); border-color: var(--border); }
+.question-item.active { background: #2a2e3a; border-color: #3a4050; }
+.q-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.badge { padding: 2px 6px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.badge.Easy { background: rgba(0,184,163,0.15); color: var(--green); }
+.badge.Medium { background: rgba(255,161,22,0.15); color: var(--accent); }
+.badge.Hard { background: rgba(255,55,87,0.15); color: var(--red); }
+.sidebar-footer { padding: 10px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.sidebar-footer code { background: var(--panel2); padding: 1px 4px; border-radius: 4px; }
+
+.resizer { background: transparent; z-index: 5; flex-shrink: 0; }
+.resizer.vertical { width: 6px; cursor: col-resize; background: transparent; border-left: 1px solid transparent; border-right: 1px solid transparent; }
+.resizer.vertical:hover, .resizer.vertical.dragging { background: rgba(255,161,22,0.15); border-color: var(--accent); }
+.resizer.horizontal { height: 6px; cursor: row-resize; border-top: 1px solid transparent; border-bottom: 1px solid transparent; }
+.resizer.horizontal:hover, .resizer.horizontal.dragging { background: rgba(255,161,22,0.15); border-color: var(--accent); }
+.resizer.hidden { display: none; }
+
 .main { flex: 1; display: flex; min-width: 0; min-height: 0; }
-.problem-pane { flex: 1.1; display: flex; flex-direction: column; min-width: 260px; border-right: 1px solid var(--border); background: #15181f; overflow: hidden; }
-.resizer.vertical { width: 6px; cursor: col-resize; background: transparent; }
-.resizer.horizontal { height: 6px; cursor: row-resize; }
-.resizer:hover, .resizer.dragging { background: rgba(255,161,22,0.15); }
+.problem-pane {
+  flex: 1.1;
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+  border-right: 1px solid var(--border);
+  background: #15181f;
+  overflow: hidden;
+}
+.problem-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: #13151b; flex-shrink: 0; }
+.ptab { padding: 10px 16px; background: transparent; color: var(--muted); border: none; border-bottom: 2px solid transparent; cursor: pointer; font-size: 13px; font-weight: 600; }
+.ptab.active { color: var(--text); border-bottom-color: var(--accent); background: #1a1d24; }
+.ptab:hover { color: var(--text); }
+.ptab-panel { display: none; flex: 1; overflow-y: auto; padding: 16px 20px; }
+.ptab-panel.active { display: block; }
+.submissions-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 13px; font-weight: 700; }
