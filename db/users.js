@@ -52,5 +52,38 @@ async function setUserRole(id, role) {
   const [res] = await getPool().query(`UPDATE users SET role=? WHERE id=?`, [role, id]);
   return res.affectedRows > 0;
 }
+function validAvatarUrl(url) {
+  if (url == null || url === '') return '';
+  const s = String(url).trim().slice(0, 500);
+  if (!/^https?:\/\/[^\s]+$/i.test(s)) throw new Error('avatar must be an http(s) URL');
+  return s;
+}
+async function updateProfile(id, { avatar, bio }) {
+  const sets = [];
+  const vals = [];
+  if (avatar !== undefined) {
+    sets.push('avatar=?');
+    vals.push(validAvatarUrl(avatar) || null);
+  }
+  if (bio !== undefined) {
+    if (bio != null && String(bio).length > 500) throw new Error('bio must be at most 500 characters');
+    sets.push('bio=?');
+    vals.push(bio == null || String(bio).trim() === '' ? null : String(bio).slice(0, 500));
+  }
+  if (!sets.length) throw new Error('Nothing to update (avatar, bio)');
+  vals.push(id);
+  const [res] = await getPool().query(`UPDATE users SET ${sets.join(', ')} WHERE id=?`, vals);
+  return res.affectedRows > 0;
+}
+async function getPublicProfile(id) {
+  const [rows] = await getPool().query(
+    `SELECT id, username, avatar, bio, createdAt FROM users WHERE id=? LIMIT 1`, [id]);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id, username: r.username, avatar: r.avatar || null, bio: r.bio || null,
+    createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+  };
+}
 
-module.exports = { createUser, findUserByUsername, findUserById, findUserByEmail, publicUser, listUsers, setUserRole };
+module.exports = { createUser, findUserByUsername, findUserById, findUserByEmail, publicUser, listUsers, setUserRole, updateProfile, getPublicProfile };

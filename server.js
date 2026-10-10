@@ -1120,13 +1120,38 @@ const server = http.createServer(async (req, res) => {
       if (dbReady) {
         const row = await db.findUserById(u.id);
         if (!row) return sendJson(res, { error: "User not found" }, 404);
-        return sendJson(res, { id: row.id, username: row.username, email: row.email, role: row.role }, 200);
+        return sendJson(res, {
+          id: row.id, username: row.username, email: row.email, role: row.role,
+          avatar: row.avatar || null, bio: row.bio || null,
+        }, 200);
       } else {
         return sendJson(res, u, 200);
       }
     } catch (e) {
       return sendJson(res, { error: e.message }, 500);
     }
+  }
+  if (pathname === "/api/me" && req.method === "PUT") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { avatar, bio } = JSON.parse(body || "{}");
+        if (avatar === undefined && bio === undefined) {
+          return sendJson(res, { error: "Nothing to update (avatar, bio)" }, 400);
+        }
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const ok = await db.updateProfile(u.id, { avatar, bio });
+        if (!ok) return sendJson(res, { error: "User not found" }, 404);
+        const row = await db.findUserById(u.id);
+        console.log(`Profile updated: ${u.username}`);
+        return sendJson(res, db.publicUser ? db.publicUser(row) : row, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 400); }
+    });
+    return;
   }
 
   // ---------- Admin APIs ----------
@@ -1252,6 +1277,17 @@ const server = http.createServer(async (req, res) => {
   }
   if (pathname.startsWith("/api/users/") && req.method === "GET") {
     const parts = pathname.split("/").filter(Boolean);
+    if (parts.length === 4 && parts[3] === "profile") {
+      const idPart = decodeURIComponent(parts[2]);
+      if (!/^\d+$/.test(idPart)) return sendJson(res, { error: "Invalid user id" }, 400);
+      try {
+        await ensureDb();
+        if (!dbReady || !db.getPublicProfile) return sendJson(res, { error: "DB not ready" }, 500);
+        const p = await db.getPublicProfile(parseInt(idPart, 10));
+        if (!p) return sendJson(res, { error: "User not found" }, 404);
+        return sendJson(res, p, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    }
     if (parts.length === 4 && (parts[3] === "stats" || parts[3] === "dashboard")) {
       const idPart = decodeURIComponent(parts[2]);
       const action = parts[3];
