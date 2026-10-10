@@ -471,6 +471,8 @@ body {
 .lc-verdict-row{ display:flex; align-items:center; gap:10px; margin:2px 0 4px; }
 .lc-count{ color:var(--muted); font-size:13px; }
 .lc-sub{ color:var(--muted); font-size:12px; margin-bottom:12px; }
+.lc-complexity{ font-size:12px; color:var(--muted); margin:0 0 10px; }
+.lc-complexity strong{ color:var(--text); }
 .lc-cards{ display:flex; gap:10px; margin:0 0 12px; }
 .lc-card{ background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px; }
 .lc-card.lc-stat{ flex:1; margin-bottom:0; }

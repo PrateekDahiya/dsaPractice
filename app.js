@@ -669,8 +669,12 @@ function runStatsHtml(results){
 }
 async function requestComplexity(question, code, lang){
   const line=document.getElementById("complexity-line");
+  const leftLine=document.getElementById("complexity-line-left");
   window.__lastComplexity=null;
-  if(!line || !question) return;
+  if((!line && !leftLine) || !question) return;
+  const setLines=(html)=>{ if(line) line.innerHTML=html; if(leftLine) leftLine.innerHTML=html; };
+  const setText=(t)=>{ if(line) line.textContent=t; if(leftLine) leftLine.textContent=t; };
+  setText("Analyzing complexity…");
   try{
     const res=await apiFetch("/api/complexity",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({questionId:question.id,language:lang,code})});
     const d=await res.json().catch(()=>({}));
@@ -681,13 +685,13 @@ async function requestComplexity(question, code, lang){
     const sOk=!d.expectedSpace||norm(d.space)===norm(d.expectedSpace);
     const exp=(d.expectedTime||d.expectedSpace)?` · expected ${d.expectedTime||"?"} / ${d.expectedSpace||"?"}`:"";
     const mark=(d.expectedTime||d.expectedSpace)?(tOk&&sOk?" ✓":" ⚠"):"";
-    line.innerHTML=`Complexity (AI): yours <strong>${esc(d.time)} time · ${esc(d.space)} space</strong>${esc(exp)}${mark}${d.note?` — <span style="color:var(--muted)">${esc(d.note)}</span>`:""}`;
+    setLines(`Complexity (AI): yours <strong>${esc(d.time)} time · ${esc(d.space)} space</strong>${esc(exp)}${mark}${d.note?` — <span style="color:var(--muted)">${esc(d.note)}</span>`:""}`);
     const sid=window.__lastSubmissionId;
     if(sid){
       try{ await apiFetch(`/api/submissions/${sid}/complexity`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({time:d.time,space:d.space})}); }catch{}
     }
     if(isPerfActive()) renderPerformance();
-  }catch(e){ line.textContent="Complexity unavailable ("+e.message+")"; if(isPerfActive()) renderPerformance(); }
+  }catch(e){ setText("Complexity unavailable ("+e.message+")"); if(isPerfActive()) renderPerformance(); }
 }
 function isPerfActive(){ const p=document.getElementById("ptab-perf"); return p&&p.classList.contains("active"); }
 async function renderPerformance(){
@@ -822,7 +826,7 @@ function showSubmitResult(payload) {
       <div class="lc-card lc-stat"><div class="lc-card-label">⏱ Runtime</div><div class="lc-card-val">${avg} ms</div></div>
       <div class="lc-card lc-stat"><div class="lc-card-label">🧠 Memory</div><div class="lc-card-val">${esc(fmtMemShort(mem))}</div></div>
     </div>` : ""}
-    ${v.allError ? `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(results[0].error || "Unknown error")}</pre></div>` : `<div class="case-pills">${casePillsHtml(results, window.__resultSel)}</div><div id="result-detail">${lcDetailHtml(results[window.__resultSel])}</div>`}
+    ${v.allError ? `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(results[0].error || "Unknown error")}</pre></div>` : `<div id="complexity-line-left" class="lc-complexity"></div><div class="case-pills">${casePillsHtml(results, window.__resultSel)}</div><div id="result-detail">${lcDetailHtml(results[window.__resultSel])}</div>`}
     <div class="lc-code-head">Code <span style="color:var(--muted)">|</span> ${esc(langLabel)}</div>
     <pre class="lc-code">${esc(code)}</pre>
   `;
