@@ -35,6 +35,9 @@
       <label>Password
         <input id="password" name="password" type="password" placeholder="••••••••" required minlength="6" />
       </label>
+      <div style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+        <label>Website (leave blank)<input id="website" name="website" type="text" tabindex="-1" autocomplete="off" /></label>
+      </div>
       <button type="submit" class="btn primary" style="width:100%;margin-top:8px;padding:10px">Login</button>
       <div id="auth-error" class="auth-error hidden"></div>
       <p style="margin-top:12px;font-size:13px;color:var(--muted);text-align:center">No account? <a href="register.html" style="color:var(--accent)">Register</a></p>
@@ -54,7 +57,7 @@
       const btn = e.target.querySelector("button[type=submit]");
       btn.disabled=true; btn.textContent="Logging in...";
       try{
-        const res = await fetch("/api/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ username, password }) });
+        const res = await fetch("/api/auth/login", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ username, password, website: document.getElementById("website").value || "" }) });
         const data = await res.json().catch(()=>({}));
         if(!res.ok) throw new Error(data.error || "Login failed");
         localStorage.setItem("token", data.token);

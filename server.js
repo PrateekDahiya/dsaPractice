@@ -78,6 +78,18 @@ setInterval(() => {
         for (const [k, v] of m) if (now - v > ttl) m.delete(k);
       }
     }
+    // sliding-window maps (arrays): drop expired hits, cap entries
+    for (const m of [registerHits, loginHits]) {
+      for (const [k, arr] of m) {
+        const fresh = (arr || []).filter((t) => now - t < AUTH_WINDOW_MS);
+        if (!fresh.length) m.delete(k);
+        else if (fresh.length !== arr.length) m.set(k, fresh);
+      }
+      if (m.size > 5000) {
+        const drop = [...m.keys()].slice(0, m.size - 5000);
+        drop.forEach((k) => m.delete(k));
+      }
+    }
     if (cache.leaderboard.size > 100) cache.leaderboard.clear();
   } catch {}
 }, 60000).unref();
@@ -277,6 +289,31 @@ function runExeTracked(exe, args, env, timeoutMs, tmsg) {
 const genRate = new Map(); // userId -> lastAcceptedMs
 const GEN_MIN_GAP_MS = 30000;
 const genInflight = new Set(); // userIds with a generation running
+// ---------- auth anti-spam: per-IP sliding windows + register/login honeypot ----------
+// NOTE: uses X-Forwarded-For (Render terminates TLS at its proxy, so the socket
+// IP is internal). Trusts the first entry, as set by our own proxy chain.
+const REGISTER_MAX_PER_HOUR = parseInt(process.env.REGISTER_MAX_PER_HOUR || "5", 10) || 5;
+const LOGIN_MAX_PER_HOUR = parseInt(process.env.LOGIN_MAX_PER_HOUR || "20", 10) || 20;
+const AUTH_WINDOW_MS = 3600 * 1000;
+const registerHits = new Map(); // ip -> [timestamps]
+const loginHits = new Map();
+function clientIp(req) {
+  try {
+    const fwd = req.headers["x-forwarded-for"] || req.headers["X-Forwarded-For"] || "";
+    const first = String(fwd).split(",")[0].trim();
+    if (first) return first.slice(0, 64);
+  } catch {}
+  return (req.socket && req.socket.remoteAddress) || "unknown";
+}
+function hitRateLimit(map, ip, maxPerHour) {
+  const now = Date.now();
+  let arr = map.get(ip) || [];
+  arr = arr.filter((t) => now - t < AUTH_WINDOW_MS);
+  if (arr.length >= maxPerHour) { map.set(ip, arr); return true; }
+  arr.push(now);
+  map.set(ip, arr);
+  return false;
+}
 // ---------- complexity guards: per-IP rate limit + sha cache (mirrors lint) ----------
 const compRate = new Map(); // ip -> lastAcceptedMs
 const COMP_MIN_GAP_MS = 60000;
@@ -1059,7 +1096,16 @@ const server = http.createServer(async (req, res) => {
     req.on("data", chunk => body += chunk);
     req.on("end", async () => {
       try {
-        const { username, email, password } = JSON.parse(body || "{}");
+        const { username, email, password, website } = JSON.parse(body || "{}");
+        // honeypot: invisible "website" field — bots fill it, humans can't see
+        // it. Pretend success without creating anything (don't tip off the bot).
+        if (typeof website === "string" && website.trim() !== "") {
+          console.warn("register honeypot tripped");
+          return sendJson(res, { ok: true }, 201);
+        }
+        if (hitRateLimit(registerHits, clientIp(req), REGISTER_MAX_PER_HOUR)) {
+          return sendJson(res, { error: "Too many registrations from this network, try again later" }, 429);
+        }
         // validation
         if (!username || !/^[a-z0-9_]{3,20}$/.test(username)) {
           return sendJson(res, { error: "Invalid username: must match ^[a-z0-9_]{3,20}$" }, 400);
@@ -1100,7 +1146,14 @@ const server = http.createServer(async (req, res) => {
     req.on("data", chunk => body += chunk);
     req.on("end", async () => {
       try {
-        const { username, password } = JSON.parse(body || "{}");
+        const { username, password, website } = JSON.parse(body || "{}");
+        // honeypot sibling of register (bots replaying the same payload)
+        if (typeof website === "string" && website.trim() !== "") {
+          return sendJson(res, { error: "Invalid credentials" }, 401);
+        }
+        if (hitRateLimit(loginHits, clientIp(req), LOGIN_MAX_PER_HOUR)) {
+          return sendJson(res, { error: "Too many login attempts from this network, try again later" }, 429);
+        }
         if (!username || !password) return sendJson(res, { error: "Missing username or password" }, 400);
         if (!db) return sendJson(res, { error: "DB not available" }, 500);
         await ensureDb();
@@ -1706,7 +1759,7 @@ const server = http.createServer(async (req, res) => {
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large" }, 400);
         if (!process.env.GROQ_API_KEY) return sendJson(res, { error: "AI complexity not configured" }, 503);
-        const ip = (req.socket && req.socket.remoteAddress) || "anon";
+        const ip = clientIp(req);
         const now = Date.now();
         const key = crypto.createHash("sha256").update(questionId + "\0" + language + "\0" + code).digest("hex");
         const hit = compCacheGet(key);
@@ -2186,7 +2239,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, { diagnostics: cached }, 200);
         }
         // Per-IP rate limit: min 1200ms between ACCEPTED requests
-        const ip = (req.socket && req.socket.remoteAddress) || "unknown";
+        const ip = clientIp(req);
         const now = Date.now();
         const last = lintRate.get(ip) || 0;
         if (now - last < LINT_MIN_GAP_MS) {
