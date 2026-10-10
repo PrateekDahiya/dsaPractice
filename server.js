@@ -129,6 +129,17 @@ function pchCompileArgs() {
   if (!ENABLE_PCH || !pchExists()) return [];
   try { return ["-I", pchDir()]; } catch { return []; }
 }
+// User-friendly compile error (user-code lines only, STL noise filtered).
+// Full stderr still goes to server logs for debugging.
+function prettyCompileError(cErr, tmpCpp, code) {
+  try { console.warn("[cpp] full compile error:", String(cErr).slice(0, 2000)); } catch {}
+  try {
+    const { formatGccError } = require("./server/utils/lint");
+    return formatGccError(cErr, { tmpBase: tmpCpp, hasInclude: String(code).includes("#include"), userCode: code });
+  } catch {
+    return "Compile Error:\n" + String(cErr || "").split("\n")[0].slice(0, 500);
+  }
+}
 let pchBuilding = false;
 function maybeBuildPch() {
   // Self-throttling: only when enabled, missing, idle (>30s since last exec/lint g++),
@@ -719,7 +730,7 @@ int main(){
     compile.on("close", async cCode => {
       if (cCode !== 0) {
         try { fs.unlinkSync(tmpCpp); } catch {}
-        return reject(new Error("Compile Error:\\n" + cErr));
+        return reject(new Error(prettyCompileError(cErr, tmpCpp, code)));
       }
       const binDir = path.dirname(compiler);
       const runEnv = { ...process.env, PATH: binDir + path.delimiter + process.env.PATH };
@@ -893,7 +904,7 @@ int main(){
     const compile = spawn(compiler, ["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]);
     let cErr=""; compile.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
     compile.on("error", err=>{ try{fs.unlinkSync(tmpCpp);}catch{}; if(err.code==="ENOENT") return reject(new Error("g++ not found")); reject(new Error("Compile spawn error: "+err.message)); });
-    compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
+    compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error(prettyCompileError(cErr, tmpCpp, code))); }
       const binDir=path.dirname(compiler); const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
       let tracked;
       try { tracked = await runExeTracked(exe, [], runEnv, 8000, "Time Limit Exceeded (C++ >8s)"); }
@@ -1697,7 +1708,7 @@ const server = http.createServer(async (req, res) => {
               await new Promise((res,rej)=>{
                 const comp=spawn(compiler, ["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]);
                 comp.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
-                comp.on("close",c=>{ exeCachePrune(); c===0?res():rej(new Error("Compile Error:\\n"+cErr)); });
+                comp.on("close",c=>{ exeCachePrune(); c===0?res():rej(new Error(prettyCompileError(cErr, tmpCpp, code))); });
                 comp.on("error",e=>rej(new Error("Compile spawn error: "+e.message)));
               });
               try{fs.unlinkSync(tmpCpp);}catch{}
@@ -1819,7 +1830,7 @@ const server = http.createServer(async (req, res) => {
               const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","g++"];
               let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
               let cErr="";
-              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error("Compile Error:\\n"+cErr)); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
+              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error(prettyCompileError(cErr, tmpCpp, code))); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
               try{fs.unlinkSync(tmpCpp);}catch{}
             }
             const binDir=path.dirname(fs.existsSync("C:\\mingw64\\bin\\g++.exe")?"C:\\mingw64\\bin\\g++.exe":"g++");
