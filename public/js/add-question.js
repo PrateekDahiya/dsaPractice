@@ -52,11 +52,24 @@ const TEMPLATE = {
 
 function openModal() {
   if(!modal || !jsonTextarea) return;
+  editingId = null;
+  if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = "Save to questions/"; }
   modal.classList.remove("hidden");
   if (!jsonTextarea.value.trim()) jsonTextarea.value = JSON.stringify(TEMPLATE, null, 2);
 }
 
-function closeModal() { if(!modal) return; modal.classList.add("hidden"); if(jsonError) jsonError.classList.add("hidden"); if(formError) formError.classList.add("hidden"); }
+function openEditModal(q) {
+  if(!modal || !jsonTextarea || !q) return;
+  editingId = q.id;
+  const clean = { ...q };
+  delete clean._createdAt; delete clean._file;
+  jsonTextarea.value = JSON.stringify(clean, null, 2);
+  if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = `Update ${q.id}`; }
+  modal.classList.remove("hidden");
+  if(jsonError) jsonError.classList.add("hidden");
+}
+
+function closeModal() { editingId = null; if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = "Save to questions/"; } if(!modal) return; modal.classList.add("hidden"); if(jsonError) jsonError.classList.add("hidden"); if(formError) formError.classList.add("hidden"); }
 
 if(addBtn) addBtn.addEventListener("click", openModal);
 
@@ -180,6 +193,9 @@ document.getElementById("form-to-json-btn")?.addEventListener("click", () => {
 });
 
 
+// set by openEditModal(); null = create mode
+let editingId = null;
+
 if(saveBtn) saveBtn.addEventListener("click", async () => {
   let q;
   try { q = JSON.parse(jsonTextarea.value); } catch (e) {
@@ -189,19 +205,25 @@ if(saveBtn) saveBtn.addEventListener("click", async () => {
   if (errs.length) {
     jsonError.textContent = "Fix errors:\n- " + errs.join("\n- "); jsonError.classList.remove("hidden","ok"); return;
   }
-  saveBtn.disabled = true; saveBtn.textContent = "Saving...";
+  saveBtn.disabled = true; saveBtn.textContent = editingId ? "Updating..." : "Saving...";
   try {
-    const res = await apiFetch("/api/questions", {
-      method: "POST",
+    const isEdit = !!editingId;
+    if (isEdit && q.id && q.id !== editingId) throw new Error("Question id cannot be changed");
+    const url = isEdit ? `/api/questions/${encodeURIComponent(editingId)}` : "/api/questions";
+    const res = await apiFetch(url, {
+      method: isEdit ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(q)
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "save failed");
-    toast(`Saved ${q.id}.json`);
+    toast(isEdit ? `Updated ${editingId}` : `Saved ${q.id}.json`);
+    const savedId = isEdit ? editingId : q.id;
+    editingId = null;
     closeModal();
+    invalidateCache("/api/questions");
     await fetchQuestions(); renderList();
-    await loadQuestion(q.id);
+    await loadQuestion(savedId);
   } catch (e) {
     jsonError.textContent = "Save failed: " + e.message + (String(e.message).includes("Failed to fetch") ? " — is server running? Use manual drop into /questions instead." : "");
     jsonError.classList.remove("hidden","ok");

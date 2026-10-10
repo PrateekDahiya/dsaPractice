@@ -67,6 +67,7 @@
 .verdict-accepted{ color:var(--green); font-weight:800; font-size:20px; }
 .verdict-wrong{ color:var(--red); font-weight:800; font-size:20px; }
 .verdict-error{ color:var(--accent); font-weight:800; font-size:20px; }
+.verdict-custom{ color:var(--muted); font-weight:800; font-size:20px; }
 .lc-verdict-row{ display:flex; align-items:center; gap:10px; margin:2px 0 4px; }
 .lc-count{ color:var(--muted); font-size:13px; }
 .lc-sub{ color:var(--muted); font-size:12px; margin-bottom:12px; }
@@ -96,6 +97,7 @@
 .case-pill .pill-icon{ font-size:12px; }
 .case-pill.pass .pill-icon{ color:var(--green); }
 .case-pill.fail .pill-icon{ color:var(--red); }
+.case-pill.custom .pill-icon{ color:var(--muted); }
 .case-pill:hover{ color:var(--text); }
 .case-pill.active{ background:var(--panel2); color:var(--text); }
 

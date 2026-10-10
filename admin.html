@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — DSA Practice</title>
+  <link rel="icon" type="image/png" href="public/logo.png" />
+  <link rel="stylesheet" href="public/css/base.css" />
+  <link rel="stylesheet" href="public/css/layout.css" />
+  <link rel="stylesheet" href="public/css/editor.css" />
+  <link rel="stylesheet" href="public/css/components.css" />
+  <link rel="stylesheet" href="public/css/pages.css" />
+  <link rel="stylesheet" href="public/css/responsive.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text);display:flex;align-items:center;gap:8px"><img src="public/logo.png" alt="Logo" style="height:32px;width:auto;border-radius:6px;object-fit:contain"> DSA Practice</a>
+      <nav class="topbar-nav">
+        <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="problems.html" class="ghost-link">Browse</a>
+        <a href="roadmap.html" class="ghost-link">Roadmap</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+        <a href="admin.html" class="ghost-link active">Admin</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <a href="index.html" class="ghost-link">Problems</a>
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="lb-wrap">
+    <h1 style="font-size:22px;margin-bottom:6px">Admin</h1>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">User roles &amp; AI content moderation. Every action is enforced server-side.</p>
+    <div id="admin-gate" class="hidden" style="color:var(--muted);padding:20px;text-align:center"></div>
+    <div id="admin-root" class="hidden">
+      <h2 style="font-size:16px;margin:0 0 8px">Users</h2>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <input id="admin-search" placeholder="Search username/email..." style="flex:1;min-width:160px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
+        <button id="admin-prev" class="btn ghost" style="padding:6px 12px">← Prev</button>
+        <button id="admin-next" class="btn ghost" style="padding:6px 12px">Next →</button>
+      </div>
+      <div id="admin-users-loading" style="color:var(--muted);padding:12px">Loading...</div>
+      <table class="lb-table hidden" id="admin-table">
+        <thead><tr><th style="width:60px">ID</th><th>Username</th><th>Email</th><th style="width:110px">Role</th><th style="width:120px">Joined</th></tr></thead>
+        <tbody id="admin-body"></tbody>
+      </table>
+      <div id="admin-count" style="color:var(--muted);font-size:12px;margin:8px 0 20px"></div>
+      <h2 style="font-size:16px;margin:0 0 8px">AI moderation</h2>
+      <div class="lc-card">
+        <div style="font-size:13px;margin-bottom:8px">Delete up to 50 <code>ai-generated</code> questions nobody ever solved.</div>
+        <button id="admin-prune" class="btn secondary" style="padding:6px 12px">Prune stale AI questions</button>
+        <span id="admin-prune-out" style="font-size:12px;color:var(--muted);margin-left:8px"></span>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    let offset=0; const LIMIT=25;
+    function me(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    async function loadUsers(){
+      $("#admin-users-loading").classList.remove("hidden");
+      $("#admin-table").classList.add("hidden");
+      try{
+        const q=encodeURIComponent($("#admin-search").value.trim());
+        const r=await fetch(`/api/admin/users?limit=${LIMIT}&offset=${offset}&q=${q}`,{headers:authHeaders({})});
+        const d=await r.json();
+        if(!r.ok) throw new Error(d.error||"load failed");
+        const rows=d.users||[];
+        $("#admin-body").innerHTML=rows.map(u=>`<tr>
+          <td style="color:var(--muted)">${u.id}</td>
+          <td class="lb-user">${esc(u.username)}</td>
+          <td style="color:var(--muted);font-size:12px">${esc(u.email||"–")}</td>
+          <td><select data-uid="${u.id}" class="role-sel" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px">
+            <option value="user"${u.role!=="admin"?" selected":""}>user</option>
+            <option value="admin"${u.role==="admin"?" selected":""}>admin</option>
+          </select></td>
+          <td style="color:var(--muted);font-size:12px">${u.createdAt?new Date(u.createdAt).toLocaleDateString():"–"}</td>
+        </tr>`).join("");
+        $("#admin-table").classList.remove("hidden");
+        $("#admin-count").textContent=`Showing ${rows.length} of ${d.total} users`;
+        document.querySelectorAll(".role-sel").forEach(sel=>sel.addEventListener("change",()=>setRole(sel)));
+      }catch(e){
+        $("#admin-users-loading").textContent="Error: "+e.message;
+      }finally{
+        if(!$("#admin-table").classList.contains("hidden")) $("#admin-users-loading").classList.add("hidden");
+      }
+    }
+    async function setRole(sel){
+      const uid=sel.dataset.uid, role=sel.value;
+      sel.disabled=true;
+      try{
+        const r=await fetch(`/api/admin/users/${uid}/role`,{method:"PUT",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({role})});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(d.error||"update failed");
+        toast(`User ${uid} → ${role}`);
+      }catch(e){
+        toast("Failed: "+e.message);
+        await loadUsers();
+      }finally{ sel.disabled=false; }
+    }
+    (async()=>{
+      const t=getToken();
+      let u=me();
+      if(t && !u){
+        try{ const r=await fetch("/api/me",{headers:{Authorization:"Bearer "+t}}); if(r.ok){ u=await r.json(); localStorage.setItem("user",JSON.stringify(u)); } }catch{}
+      }
+      if(!u || u.role!=="admin"){
+        const g=$("#admin-gate");
+        g.classList.remove("hidden");
+        g.innerHTML=`<h2 style="color:var(--text)">Forbidden</h2><p>Admin access only. <a href="login.html" class="ghost-link">Login</a></p>`;
+        return;
+      }
+      $("#admin-root").classList.remove("hidden");
+      $("#admin-search").addEventListener("input",()=>{ offset=0; loadUsers(); });
+      $("#admin-prev").addEventListener("click",()=>{ offset=Math.max(0,offset-LIMIT); loadUsers(); });
+      $("#admin-next").addEventListener("click",()=>{ offset+=LIMIT; loadUsers(); });
+      $("#admin-prune").addEventListener("click",async(ev)=>{
+        const btn=ev.target;
+        if(!confirm("Delete up to 50 unsolved AI-generated questions? This cannot be undone.")) return;
+        btn.disabled=true;
+        try{
+          const r=await fetch("/api/admin/questions/stale-ai",{method:"DELETE",headers:authHeaders({})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.error||"prune failed");
+          $("#admin-prune-out").textContent=`Deleted ${d.deleted.length}: ${(d.deleted||[]).join(", ")||"none"}`;
+          toast(`Pruned ${d.deleted.length} questions`);
+        }catch(e){ toast("Prune failed: "+e.message); }
+        finally{ btn.disabled=false; }
+      });
+      await loadUsers();
+    })();
+  </script>
+</body>
+</html>

@@ -32,6 +32,7 @@ try { db = require("./db"); } catch { db = null; }
 let dbReady = false;
 let useDb = !!db;
 let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
+let dailyCache = { date: "", payload: null }; // daily challenge (UTC date -> pick)
 // ---------- lint guards: single-flight + cache + rate limit (OOM fix for /api/lint) ----------
 const lintStats = { total: 0, cacheHits: 0, rateLimited: 0, execRejected: 0 };
 let lintInflightCpp = 0; // max 1 concurrent g++ lint process
@@ -75,6 +76,18 @@ setInterval(() => {
         for (const [k, v] of m) { if (now - v > ttl) m.delete(k); if (m.size <= 1000) break; }
       } else {
         for (const [k, v] of m) if (now - v > ttl) m.delete(k);
+      }
+    }
+    // sliding-window maps (arrays): drop expired hits, cap entries
+    for (const m of [registerHits, loginHits]) {
+      for (const [k, arr] of m) {
+        const fresh = (arr || []).filter((t) => now - t < AUTH_WINDOW_MS);
+        if (!fresh.length) m.delete(k);
+        else if (fresh.length !== arr.length) m.set(k, fresh);
+      }
+      if (m.size > 5000) {
+        const drop = [...m.keys()].slice(0, m.size - 5000);
+        drop.forEach((k) => m.delete(k));
       }
     }
     if (cache.leaderboard.size > 100) cache.leaderboard.clear();
@@ -128,6 +141,17 @@ function pchCompileArgs() {
   // .gch first and memory-maps it instead of re-parsing the STL.
   if (!ENABLE_PCH || !pchExists()) return [];
   try { return ["-I", pchDir()]; } catch { return []; }
+}
+// User-friendly compile error (user-code lines only, STL noise filtered).
+// Full stderr still goes to server logs for debugging.
+function prettyCompileError(cErr, tmpCpp, code) {
+  try { console.warn("[cpp] full compile error:", String(cErr).slice(0, 2000)); } catch {}
+  try {
+    const { formatGccError } = require("./server/utils/lint");
+    return formatGccError(cErr, { tmpBase: tmpCpp, hasInclude: String(code).includes("#include"), userCode: code });
+  } catch {
+    return "Compile Error:\n" + String(cErr || "").split("\n")[0].slice(0, 500);
+  }
 }
 let pchBuilding = false;
 function maybeBuildPch() {
@@ -265,6 +289,31 @@ function runExeTracked(exe, args, env, timeoutMs, tmsg) {
 const genRate = new Map(); // userId -> lastAcceptedMs
 const GEN_MIN_GAP_MS = 30000;
 const genInflight = new Set(); // userIds with a generation running
+// ---------- auth anti-spam: per-IP sliding windows + register/login honeypot ----------
+// NOTE: uses X-Forwarded-For (Render terminates TLS at its proxy, so the socket
+// IP is internal). Trusts the first entry, as set by our own proxy chain.
+const REGISTER_MAX_PER_HOUR = parseInt(process.env.REGISTER_MAX_PER_HOUR || "5", 10) || 5;
+const LOGIN_MAX_PER_HOUR = parseInt(process.env.LOGIN_MAX_PER_HOUR || "20", 10) || 20;
+const AUTH_WINDOW_MS = 3600 * 1000;
+const registerHits = new Map(); // ip -> [timestamps]
+const loginHits = new Map();
+function clientIp(req) {
+  try {
+    const fwd = req.headers["x-forwarded-for"] || req.headers["X-Forwarded-For"] || "";
+    const first = String(fwd).split(",")[0].trim();
+    if (first) return first.slice(0, 64);
+  } catch {}
+  return (req.socket && req.socket.remoteAddress) || "unknown";
+}
+function hitRateLimit(map, ip, maxPerHour) {
+  const now = Date.now();
+  let arr = map.get(ip) || [];
+  arr = arr.filter((t) => now - t < AUTH_WINDOW_MS);
+  if (arr.length >= maxPerHour) { map.set(ip, arr); return true; }
+  arr.push(now);
+  map.set(ip, arr);
+  return false;
+}
 // ---------- complexity guards: per-IP rate limit + sha cache (mirrors lint) ----------
 const compRate = new Map(); // ip -> lastAcceptedMs
 const COMP_MIN_GAP_MS = 60000;
@@ -342,6 +391,21 @@ function requireAuth(req, res) {
   const u = authenticate(req);
   if (!u) {
     sendJson(res, { error: "Unauthorized" }, 401);
+    return null;
+  }
+  return u;
+}
+function isAdmin(u) {
+  return !!u && u.role === "admin";
+}
+function requireAdmin(req, res) {
+  const u = authenticate(req);
+  if (!u) {
+    sendJson(res, { error: "Unauthorized" }, 401);
+    return null;
+  }
+  if (!isAdmin(u)) {
+    sendJson(res, { error: "Forbidden: admin only" }, 403);
     return null;
   }
   return u;
@@ -719,7 +783,7 @@ int main(){
     compile.on("close", async cCode => {
       if (cCode !== 0) {
         try { fs.unlinkSync(tmpCpp); } catch {}
-        return reject(new Error("Compile Error:\\n" + cErr));
+        return reject(new Error(prettyCompileError(cErr, tmpCpp, code)));
       }
       const binDir = path.dirname(compiler);
       const runEnv = { ...process.env, PATH: binDir + path.delimiter + process.env.PATH };
@@ -893,7 +957,7 @@ int main(){
     const compile = spawn(compiler, ["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]);
     let cErr=""; compile.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
     compile.on("error", err=>{ try{fs.unlinkSync(tmpCpp);}catch{}; if(err.code==="ENOENT") return reject(new Error("g++ not found")); reject(new Error("Compile spawn error: "+err.message)); });
-    compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
+    compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error(prettyCompileError(cErr, tmpCpp, code))); }
       const binDir=path.dirname(compiler); const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
       let tracked;
       try { tracked = await runExeTracked(exe, [], runEnv, 8000, "Time Limit Exceeded (C++ >8s)"); }
@@ -907,6 +971,11 @@ async function executeQuestion(question, code, language) {
   const testCases = question._testCasesForMode;
   const results = [];
   let passed = 0;
+  // Custom-input rows (expectedOutput null) are output-only: shown but never
+  // scored, so totals count stored cases only.
+  const isCustom = (tc) => tc && tc.expectedOutput === null;
+  const storedTotal = testCases.filter((tc) => !isCustom(tc)).length;
+  const score = (tc, actual) => (isCustom(tc) ? null : deepEqual(actual, tc.expectedOutput, question.id));
   // batch for cpp/python (compile once), js keep per-case (fast vm)
   if (language === "cpp" && testCases.length > 1) {
     const startAll = Date.now();
@@ -915,15 +984,15 @@ async function executeQuestion(question, code, language) {
       for (let i=0;i<testCases.length;i++) {
         const tc=testCases[i];
         const actual=actuals[i];
-        const ok=deepEqual(actual, tc.expectedOutput, question.id);
-        if(ok) passed++;
+        const ok=score(tc, actual);
+        if(ok===true) passed++;
         results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length), memKb});
       }
     } catch (e) {
       const msg=e.message;
-      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed: isCustom(tc) ? null : false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
     }
-    return { total: testCases.length, passed, results };
+    return { total: storedTotal, passed, results };
   }
   if (language === "python" && testCases.length > 1) {
     const startAll = Date.now();
@@ -932,15 +1001,15 @@ async function executeQuestion(question, code, language) {
       for (let i=0;i<testCases.length;i++) {
         const tc=testCases[i];
         const actual=actuals[i];
-        const ok=deepEqual(actual, tc.expectedOutput, question.id);
-        if(ok) passed++;
+        const ok=score(tc, actual);
+        if(ok===true) passed++;
         results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length), memKb});
       }
     } catch (e) {
       const msg=e.message;
-      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed: isCustom(tc) ? null : false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
     }
-    return { total: testCases.length, passed, results };
+    return { total: storedTotal, passed, results };
   }
   for (const tc of testCases) {
     const start = Date.now();
@@ -958,12 +1027,13 @@ async function executeQuestion(question, code, language) {
       } else {
         throw new Error(`Unsupported language: ${language}`);
       }
-      ok = deepEqual(actual, tc.expectedOutput, question.id);
+      ok = score(tc, actual);
     } catch (e) {
       error = e.message;
       if (String(e.message).includes("Script execution timed out")) error = "Time Limit Exceeded (JS >2s)";
     }
-    if (ok) passed++;
+    if (ok === true) passed++;
+    if (error && isCustom(tc)) ok = null;
     results.push({
       testCaseId: tc.id,
       passed: ok,
@@ -976,7 +1046,7 @@ async function executeQuestion(question, code, language) {
       memKb
     });
   }
-  return { total: testCases.length, passed, results };
+  return { total: storedTotal, passed, results };
 }
 
 // ---------- http helpers ----------
@@ -1026,7 +1096,16 @@ const server = http.createServer(async (req, res) => {
     req.on("data", chunk => body += chunk);
     req.on("end", async () => {
       try {
-        const { username, email, password } = JSON.parse(body || "{}");
+        const { username, email, password, website } = JSON.parse(body || "{}");
+        // honeypot: invisible "website" field — bots fill it, humans can't see
+        // it. Pretend success without creating anything (don't tip off the bot).
+        if (typeof website === "string" && website.trim() !== "") {
+          console.warn("register honeypot tripped");
+          return sendJson(res, { ok: true }, 201);
+        }
+        if (hitRateLimit(registerHits, clientIp(req), REGISTER_MAX_PER_HOUR)) {
+          return sendJson(res, { error: "Too many registrations from this network, try again later" }, 429);
+        }
         // validation
         if (!username || !/^[a-z0-9_]{3,20}$/.test(username)) {
           return sendJson(res, { error: "Invalid username: must match ^[a-z0-9_]{3,20}$" }, 400);
@@ -1067,7 +1146,14 @@ const server = http.createServer(async (req, res) => {
     req.on("data", chunk => body += chunk);
     req.on("end", async () => {
       try {
-        const { username, password } = JSON.parse(body || "{}");
+        const { username, password, website } = JSON.parse(body || "{}");
+        // honeypot sibling of register (bots replaying the same payload)
+        if (typeof website === "string" && website.trim() !== "") {
+          return sendJson(res, { error: "Invalid credentials" }, 401);
+        }
+        if (hitRateLimit(loginHits, clientIp(req), LOGIN_MAX_PER_HOUR)) {
+          return sendJson(res, { error: "Too many login attempts from this network, try again later" }, 429);
+        }
         if (!username || !password) return sendJson(res, { error: "Missing username or password" }, 400);
         if (!db) return sendJson(res, { error: "DB not available" }, 500);
         await ensureDb();
@@ -1094,7 +1180,10 @@ const server = http.createServer(async (req, res) => {
       if (dbReady) {
         const row = await db.findUserById(u.id);
         if (!row) return sendJson(res, { error: "User not found" }, 404);
-        return sendJson(res, { id: row.id, username: row.username, email: row.email, role: row.role }, 200);
+        return sendJson(res, {
+          id: row.id, username: row.username, email: row.email, role: row.role,
+          avatar: row.avatar || null, bio: row.bio || null,
+        }, 200);
       } else {
         return sendJson(res, u, 200);
       }
@@ -1102,8 +1191,194 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { error: e.message }, 500);
     }
   }
+  if (pathname === "/api/me" && req.method === "PUT") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { avatar, bio } = JSON.parse(body || "{}");
+        if (avatar === undefined && bio === undefined) {
+          return sendJson(res, { error: "Nothing to update (avatar, bio)" }, 400);
+        }
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const ok = await db.updateProfile(u.id, { avatar, bio });
+        if (!ok) return sendJson(res, { error: "User not found" }, 404);
+        const row = await db.findUserById(u.id);
+        console.log(`Profile updated: ${u.username}`);
+        return sendJson(res, db.publicUser ? db.publicUser(row) : row, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+  if (pathname === "/api/me/password" && req.method === "POST") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { currentPassword, newPassword } = JSON.parse(body || "{}");
+        if (!currentPassword || !newPassword) {
+          return sendJson(res, { error: "Missing fields: currentPassword, newPassword" }, 400);
+        }
+        if (typeof newPassword !== "string" || newPassword.length < 6) {
+          return sendJson(res, { error: "New password must be at least 6 characters" }, 400);
+        }
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const row = await db.findUserById(u.id);
+        if (!row) return sendJson(res, { error: "User not found" }, 404);
+        if (!verifyPassword(currentPassword, row.password_hash)) {
+          return sendJson(res, { error: "Current password is incorrect" }, 401);
+        }
+        await db.updatePassword(u.id, hashPassword(newPassword));
+        console.log(`Password changed: ${u.username}`);
+        return sendJson(res, { ok: true }, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
+  if (pathname === "/api/me/export" && req.method === "GET") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      const data = await db.exportUserData(u.id);
+      if (!data) return sendJson(res, { error: "User not found" }, 404);
+      const body = JSON.stringify(data, null, 2);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="dsa-export-${u.username}.json"`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      return res.end(body);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname === "/api/me" && req.method === "DELETE") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { password } = JSON.parse(body || "{}");
+        if (!password) return sendJson(res, { error: "Password confirmation required" }, 400);
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const row = await db.findUserById(u.id);
+        if (!row) return sendJson(res, { error: "User not found" }, 404);
+        if (!verifyPassword(password, row.password_hash)) {
+          return sendJson(res, { error: "Password is incorrect" }, 401);
+        }
+        await db.deleteUser(u.id);
+        console.log(`Account deleted: ${u.username} (id ${u.id})`);
+        return sendJson(res, { ok: true }, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
 
-  // ---------- Stats / Streaks / Leaderboard APIs ----------
+  // ---------- Admin APIs ----------
+  if (pathname === "/api/admin/users" && req.method === "GET") {
+    const u = requireAdmin(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      const limit = parseInt(url.searchParams.get("limit") || "50", 10);
+      const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+      const q = (url.searchParams.get("q") || "").slice(0, 50);
+      return sendJson(res, await db.listUsers({ limit, offset, q }), 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname.match(/^\/api\/admin\/users\/\d+\/role$/) && req.method === "PUT") {
+    const u = requireAdmin(req, res);
+    if (!u) return;
+    const targetId = parseInt(pathname.split("/").filter(Boolean)[3], 10);
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { role } = JSON.parse(body || "{}");
+        if (!["user", "admin"].includes(role)) return sendJson(res, { error: "role must be user or admin" }, 400);
+        if (targetId === Number(u.id) && role !== "admin") {
+          return sendJson(res, { error: "You cannot demote yourself" }, 400);
+        }
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const ok = await db.setUserRole(targetId, role);
+        if (!ok) return sendJson(res, { error: "User not found" }, 404);
+        console.log(`Admin ${u.username} set user ${targetId} role=${role}`);
+        return sendJson(res, { ok: true, id: targetId, role }, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
+  if (pathname === "/api/admin/questions/stale-ai" && req.method === "DELETE") {
+    const u = requireAdmin(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      // ai-generated questions nobody ever solved (cap 50 per call)
+      let rows = [];
+      try {
+        [rows] = await db.getPool().query(
+          `SELECT q.id FROM questions q
+           LEFT JOIN (SELECT DISTINCT questionId FROM submissions WHERE passed=total AND mode='submit') s ON s.questionId=q.id
+           LEFT JOIN (SELECT DISTINCT questionId FROM manual_solved) m ON m.questionId=q.id
+           WHERE s.questionId IS NULL AND m.questionId IS NULL
+             AND JSON_CONTAINS(q.tags, '"ai-generated"', '$')
+           LIMIT 50`);
+      } catch {
+        [rows] = await db.getPool().query(
+          `SELECT q.id FROM questions q
+           LEFT JOIN (SELECT DISTINCT questionId FROM submissions WHERE passed=total AND mode='submit') s ON s.questionId=q.id
+           WHERE s.questionId IS NULL AND JSON_CONTAINS(q.tags, '"ai-generated"', '$')
+           LIMIT 50`);
+      }
+      const deleted = [];
+      for (const r of rows) {
+        try {
+          if (db.dbDeleteQuestion) await db.dbDeleteQuestion(r.id);
+          try { fs.unlinkSync(path.join(QUESTIONS_DIR, `${r.id}.json`)); } catch {}
+          try { questionCache.delete(r.id); } catch {}
+          deleted.push(r.id);
+        } catch (e) { console.warn("stale-ai delete skipped", r.id, e.message); }
+      }
+      cache.questions = null;
+      cache.leaderboard.clear();
+      console.log(`Admin ${u.username} pruned ${deleted.length} stale AI questions`);
+      return sendJson(res, { ok: true, deleted }, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+
+  // ---------- Daily challenge (deterministic UTC rotation, Medium/Hard) ----------
+  // No cron needed (Render free sleeps): derived on demand from the date, so
+  // every instance and user sees the same question all day, globally.
+  if (pathname === "/api/daily" && req.method === "GET") {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      if (dailyCache.date !== today || !dailyCache.payload) {
+        const qs = await loadQuestions();
+        const eligible = (arr) => (arr || []).filter((q) => q && q.visibleTestCases && q.visibleTestCases.length);
+        let pool = eligible((qs || []).filter((q) => q.difficulty === "Medium" || q.difficulty === "Hard"));
+        if (!pool.length) pool = eligible(qs);
+        if (!pool.length) return sendJson(res, { error: "No questions available" }, 404);
+        const h = crypto.createHash("sha256").update("daily:" + today).digest();
+        const pick = pool[h.readUInt32BE(0) % pool.length];
+        dailyCache = {
+          date: today,
+          payload: { date: today, questionId: pick.id, title: pick.title, difficulty: pick.difficulty, tags: pick.tags || [] },
+        };
+      }
+      return sendJson(res, dailyCache.payload, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname === "/api/questions/solved" && req.method === "GET") {
     tryAuthenticate(req);
     const userId = req.user ? req.user.id : null;
@@ -1151,6 +1426,17 @@ const server = http.createServer(async (req, res) => {
   }
   if (pathname.startsWith("/api/users/") && req.method === "GET") {
     const parts = pathname.split("/").filter(Boolean);
+    if (parts.length === 4 && parts[3] === "profile") {
+      const idPart = decodeURIComponent(parts[2]);
+      if (!/^\d+$/.test(idPart)) return sendJson(res, { error: "Invalid user id" }, 400);
+      try {
+        await ensureDb();
+        if (!dbReady || !db.getPublicProfile) return sendJson(res, { error: "DB not ready" }, 500);
+        const p = await db.getPublicProfile(parseInt(idPart, 10));
+        if (!p) return sendJson(res, { error: "User not found" }, 404);
+        return sendJson(res, p, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    }
     if (parts.length === 4 && (parts[3] === "stats" || parts[3] === "dashboard")) {
       const idPart = decodeURIComponent(parts[2]);
       const action = parts[3];
@@ -1244,6 +1530,68 @@ const server = http.createServer(async (req, res) => {
         if (bad) return sendJson(res, { error: bad }, 400);
         await persistQuestion(q, u);
         return sendJson(res, { ok: true, id: q.id }, 201);
+      } catch (e) {
+        if (e && e.status) return sendJson(res, { error: e.message }, e.status);
+        console.error(e);
+        return sendJson(res, { error: "Invalid JSON: " + e.message }, 400);
+      }
+    });
+    return;
+  }
+  // Edit / delete a question (owner or admin). Single-segment id only, so
+  // /mark-done and /perf sub-routes never match here.
+  if (pathname.match(/^\/api\/questions\/[^/]+$/) && (req.method === "PUT" || req.method === "DELETE")) {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    const qid = decodeURIComponent(pathname.split("/").filter(Boolean)[2]);
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const existing = await getQuestionById(qid);
+        if (!existing) return sendJson(res, { error: "Question not found" }, 404);
+        const ownerId = existing.addedBy != null ? Number(existing.addedBy) : null;
+        if (!isAdmin(u) && ownerId !== Number(u.id)) {
+          return sendJson(res, { error: "Forbidden: only the author or an admin can modify this question" }, 403);
+        }
+        if (req.method === "DELETE") {
+          if (useDb) {
+            await ensureDb();
+            if (dbReady && db.dbDeleteQuestion) await db.dbDeleteQuestion(qid);
+          }
+          try { fs.unlinkSync(path.join(QUESTIONS_DIR, `${qid}.json`)); } catch {}
+          try { questionCache.delete(qid); } catch {}
+          cache.questions = null;
+          cache.leaderboard.clear();
+          console.log(`Question deleted: ${qid} by ${u.username}${isAdmin(u) ? " (admin)" : ""}`);
+          return sendJson(res, { ok: true, id: qid }, 200);
+        }
+        const q = JSON.parse(body || "{}");
+        if (q.id && q.id !== qid) return sendJson(res, { error: "Question id in body must match URL (ids are immutable)" }, 400);
+        q.id = qid;
+        const errs = validateQuestionPayload(q);
+        if (errs.length) return sendJson(res, { error: errs.join("; ") }, 400);
+        const bad = validateTestCaseInputs([...q.visibleTestCases, ...q.hiddenTestCases], q.params);
+        if (bad) return sendJson(res, { error: bad }, 400);
+        if (!q.createdAt && existing.createdAt) q.createdAt = existing.createdAt;
+        q.updatedAt = new Date().toISOString();
+        if (useDb) {
+          await ensureDb();
+          if (dbReady && db.dbUpdateQuestion) {
+            const ok = await db.dbUpdateQuestion(qid, q);
+            if (!ok) return sendJson(res, { error: "Question not found" }, 404);
+          }
+        }
+        // refresh file backup (overwrite) so file fallback stays in sync
+        try {
+          const fileQ = { ...q, addedBy: existing.addedBy ?? null, addedByUsername: existing.addedByUsername ?? null };
+          fs.writeFileSync(path.join(QUESTIONS_DIR, `${qid}.json`), JSON.stringify(fileQ, null, 2), "utf8");
+        } catch (e) { console.warn("question file backup failed:", e.message); }
+        try { questionCache.delete(qid); } catch {}
+        cache.questions = null;
+        cache.leaderboard.clear();
+        console.log(`Question updated: ${qid} by ${u.username}${isAdmin(u) ? " (admin)" : ""}`);
+        return sendJson(res, { ok: true, id: qid }, 200);
       } catch (e) {
         if (e && e.status) return sendJson(res, { error: e.message }, e.status);
         console.error(e);
@@ -1411,7 +1759,7 @@ const server = http.createServer(async (req, res) => {
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "bad language" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large" }, 400);
         if (!process.env.GROQ_API_KEY) return sendJson(res, { error: "AI complexity not configured" }, 503);
-        const ip = (req.socket && req.socket.remoteAddress) || "anon";
+        const ip = clientIp(req);
         const now = Date.now();
         const key = crypto.createHash("sha256").update(questionId + "\0" + language + "\0" + code).digest("hex");
         const hit = compCacheGet(key);
@@ -1543,6 +1891,34 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, ids, 200);
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
   }
+  // Bookmarks: save/unsave questions for later
+  if (pathname === "/api/bookmarks" && req.method === "GET") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      const ids = dbReady && db.getBookmarkIds ? await db.getBookmarkIds(u.id) : [];
+      return sendJson(res, ids, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname.match(/^\/api\/bookmarks\/[^/]+$/) && (req.method === "POST" || req.method === "DELETE")) {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    const qid = decodeURIComponent(pathname.split("/").filter(Boolean)[2]);
+    try {
+      await ensureDb();
+      if (!dbReady || !db.addBookmark) return sendJson(res, { error: "DB not ready" }, 500);
+      const q = await getQuestionById(qid);
+      if (!q) return sendJson(res, { error: "Question not found" }, 404);
+      if (req.method === "POST") {
+        await db.addBookmark(u.id, qid);
+        return sendJson(res, { ok: true, bookmarked: true }, 200);
+      } else {
+        await db.removeBookmark(u.id, qid);
+        return sendJson(res, { ok: true, bookmarked: false }, 200);
+      }
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname.match(/^\/api\/questions\/[^/]+\/mark-done$/) && (req.method === "POST" || req.method === "DELETE")) {
     const u = requireAuth(req, res);
     if (!u) return;
@@ -1580,9 +1956,11 @@ const server = http.createServer(async (req, res) => {
       let gateKind = null, held = false;
       try {
         if (bodyTooLarge) { res.writeHead(413, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Request body too large"})); }
-        const { questionId, code, language, mode } = JSON.parse(body || "{}");
+        const parsedBody = JSON.parse(body || "{}");
+        const { questionId, code, language, mode } = parsedBody;
         if (!questionId || !code || !language || !mode) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Missing fields"})); }
         if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"bad request"})); }
+        if (parsedBody.customInput !== undefined) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"customInput is only supported on POST /api/execute"})); }
         if (language === "cpp" && DISABLE_CPP) { res.writeHead(503, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"C++ execution disabled on this instance (low memory). Use JavaScript or Python."})); }
         gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
         if (gateKind && !execTryAcquire(gateKind)) {
@@ -1697,7 +2075,7 @@ const server = http.createServer(async (req, res) => {
               await new Promise((res,rej)=>{
                 const comp=spawn(compiler, ["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]);
                 comp.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
-                comp.on("close",c=>{ exeCachePrune(); c===0?res():rej(new Error("Compile Error:\\n"+cErr)); });
+                comp.on("close",c=>{ exeCachePrune(); c===0?res():rej(new Error(prettyCompileError(cErr, tmpCpp, code))); });
                 comp.on("error",e=>rej(new Error("Compile spawn error: "+e.message)));
               });
               try{fs.unlinkSync(tmpCpp);}catch{}
@@ -1766,9 +2144,11 @@ const server = http.createServer(async (req, res) => {
       let gateKind = null, held = false;
       try {
         if (bodyTooLarge) return sendJson(res, { error: "Request body too large" }, 413);
-        const { questionId, code, language, mode, index } = JSON.parse(body || "{}");
+        const parsedCase = JSON.parse(body || "{}");
+        const { questionId, code, language, mode, index } = parsedCase;
         if (!questionId || !code || !language || !mode || index===undefined) return sendJson(res, { error: "Missing fields: questionId, code, language, mode, index" }, 400);
         if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) return sendJson(res, { error: "bad request" }, 400);
+        if (parsedCase.customInput !== undefined) return sendJson(res, { error: "customInput is only supported on POST /api/execute" }, 400);
         if (language === "cpp" && DISABLE_CPP) return sendJson(res, { error: "C++ execution disabled on this instance (low memory). Use JavaScript or Python." }, 503);
         gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
         if (gateKind && !execTryAcquire(gateKind)) {
@@ -1819,7 +2199,7 @@ const server = http.createServer(async (req, res) => {
               const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","g++"];
               let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
               let cErr="";
-              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error("Compile Error:\\n"+cErr)); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
+              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error(prettyCompileError(cErr, tmpCpp, code))); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
               try{fs.unlinkSync(tmpCpp);}catch{}
             }
             const binDir=path.dirname(fs.existsSync("C:\\mingw64\\bin\\g++.exe")?"C:\\mingw64\\bin\\g++.exe":"g++");
@@ -1859,7 +2239,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, { diagnostics: cached }, 200);
         }
         // Per-IP rate limit: min 1200ms between ACCEPTED requests
-        const ip = (req.socket && req.socket.remoteAddress) || "unknown";
+        const ip = clientIp(req);
         const now = Date.now();
         const last = lintRate.get(ip) || 0;
         if (now - last < LINT_MIN_GAP_MS) {
@@ -1930,11 +2310,18 @@ const server = http.createServer(async (req, res) => {
     req.on("end", async () => {
       try {
         if (bodyTooLarge) return sendJson(res, { error: "Request body too large" }, 413);
-        const { questionId, code, language, mode } = JSON.parse(body || "{}");
+        const { questionId, code, language, mode, customInput, customOnly } = JSON.parse(body || "{}");
         if (!questionId || !code || !language || !mode) return sendJson(res, { error: "Missing fields: questionId, code, language, mode" }, 400);
         if (!["run","submit"].includes(mode)) return sendJson(res, { error: "mode must be run or submit" }, 400);
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "language must be javascript, python or cpp" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
+        if (customInput !== undefined && mode !== "run") return sendJson(res, { error: "customInput is only allowed with mode=run" }, 400);
+        if (customInput !== undefined && (typeof customInput !== "object" || customInput === null || Array.isArray(customInput))) {
+          return sendJson(res, { error: "customInput must be an object keyed by param name" }, 400);
+        }
+        if (customInput !== undefined && JSON.stringify(customInput).length > 2000) {
+          return sendJson(res, { error: "customInput too large (max 2000 chars JSON)" }, 400);
+        }
         if (language === "cpp" && DISABLE_CPP) return sendJson(res, { error: "C++ execution disabled on this instance (low memory). Use JavaScript or Python." }, 503);
         // Global execution gate: bounds concurrent g++/python so free-tier RAM can't OOM.
         const gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
@@ -1951,7 +2338,14 @@ const server = http.createServer(async (req, res) => {
           if (!q) return sendJson(res, { error: "Question not found" }, 404);
           const visible = q.visibleTestCases.map(tc => ({ ...tc, _hidden: false }));
           const hidden = (q.hiddenTestCases||[]).map(tc => ({ ...tc, _hidden: true }));
-          q._testCasesForMode = mode === "run" ? visible : [...visible, ...hidden];
+          if (customInput !== undefined) {
+            const bad = validateTestCaseInputs([{ id: "custom", input: customInput }], q.params);
+            if (bad) return sendJson(res, { error: "customInput: " + bad }, 400);
+            const custom = { id: "custom", input: customInput, expectedOutput: null, _hidden: false };
+            q._testCasesForMode = customOnly ? [custom] : [...visible, custom];
+          } else {
+            q._testCasesForMode = mode === "run" ? visible : [...visible, ...hidden];
+          }
           const result = await executeQuestion(q, code, language);
           return sendJson(res, { mode, ...result });
         } finally {

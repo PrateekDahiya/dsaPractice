@@ -208,3 +208,78 @@ async function execute(mode) {
 if(runBtn) runBtn.addEventListener("click", () => execute("run"));
 
 if(submitBtn) submitBtn.addEventListener("click", () => execute("submit"));
+
+// ---------- Custom input run (output only, never scored) ----------
+function prefillCustomInput(){
+  const ta = document.getElementById("custom-input");
+  if(!ta || !currentQuestion) return;
+  if(ta.value.trim()) return; // don't clobber what the user typed
+  const first = currentQuestion.visibleTestCases && currentQuestion.visibleTestCases[0];
+  if(first && first.input) ta.value = JSON.stringify(first.input);
+}
+const customToggleBtn = document.getElementById("custom-btn");
+if(customToggleBtn) customToggleBtn.addEventListener("click", () => {
+  const p = document.getElementById("custom-panel");
+  if(!p) return;
+  p.classList.toggle("hidden");
+  if(!p.classList.contains("hidden")) prefillCustomInput();
+});
+async function runCustom(){
+  if (!currentQuestion) { toast("Select a problem first"); return; }
+  const code = getCode();
+  if (!code.trim()) { toast("Write some code first"); return; }
+  const ta = document.getElementById("custom-input");
+  let customInput;
+  try {
+    customInput = JSON.parse((ta && ta.value) || "{}");
+    if (typeof customInput !== "object" || customInput === null || Array.isArray(customInput)) {
+      throw new Error("must be a JSON object keyed by param name");
+    }
+  } catch(e) {
+    toast("Custom input is not valid JSON: " + e.message);
+    return;
+  }
+  saveCode();
+  showLoader();
+  const runCustomBtn = document.getElementById("run-custom-btn");
+  if(runBtn) runBtn.disabled = true;
+  if(submitBtn) submitBtn.disabled = true;
+  if(runCustomBtn) runCustomBtn.disabled = true;
+  if(statusText) statusText.textContent = "Running custom input...";
+  if(resultsEl) resultsEl.innerHTML = `<div class="loading">Running your input...</div>`;
+  window.__lastComplexity = null;
+  window.__lastSubmissionId = null;
+  try {
+    const res = await apiFetch("/api/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionId: currentQuestion.id, code, language: currentLang, mode: "run", customInput, customOnly: true })
+    });
+    const payload = await res.json().catch(()=>({}));
+    if (!res.ok) throw new Error(payload.error || "custom run failed");
+    renderResults({ mode: "run", total: payload.total ?? 0, passed: payload.passed ?? 0, results: payload.results || [] });
+    if(statusText && payload.results && payload.results.length===1 && payload.results[0].error) statusText.textContent = "Custom run error";
+    saveHistoryEntry({
+      id: Date.now() + "_" + Math.random().toString(36).slice(2,6),
+      ts: Date.now(),
+      questionId: currentQuestion.id,
+      title: currentQuestion.title,
+      language: currentLang,
+      mode: "run",
+      code,
+      passed: payload.passed ?? 0,
+      total: payload.total ?? 0,
+      results: payload.results || []
+    });
+  } catch(e) {
+    if(resultsEl) resultsEl.innerHTML = `<div class="test-case"><div class="test-body" style="display:block;color:#ff8a9a"><pre>${esc(String(e.message||e))}</pre></div></div>`;
+    if(statusText) statusText.textContent = "Custom run error";
+  } finally {
+    hideLoader();
+    if(runBtn) { runBtn.disabled = false; runBtn.textContent = "Run"; }
+    if(submitBtn) submitBtn.disabled = false;
+    if(runCustomBtn) runCustomBtn.disabled = false;
+  }
+}
+const runCustomBtnEl = document.getElementById("run-custom-btn");
+if(runCustomBtnEl) runCustomBtnEl.addEventListener("click", runCustom);

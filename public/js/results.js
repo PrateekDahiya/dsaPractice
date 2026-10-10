@@ -7,6 +7,10 @@ function verdictOf(payload) {
     const msg = results[0].error || "";
     return { label: /compile/i.test(msg) ? "Compile Error" : "Runtime Error", cls: "verdict-error", allPass: false, allError: true };
   }
+  // custom-only run (no stored cases scored): neutral verdict, output below
+  if (total === 0 && results && results.length) {
+    return { label: "Custom Output", cls: "verdict-custom", allPass: false, allError: false };
+  }
   if (passed === total) return { label: "Accepted", cls: "verdict-accepted", allPass: true, allError: false };
   return { label: "Wrong Answer", cls: "verdict-wrong", allPass: false, allError: false };
 }
@@ -42,6 +46,11 @@ function lcDetailHtml(r) {
   if (r.error && r.actual == null) {
     return `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(r.error)}</pre></div>`;
   }
+  // custom-input rows are output-only (never scored): no Expected card
+  if (r.testCaseId === "custom") {
+    return `<div class="lc-label">Input <span style="color:var(--muted);font-weight:400">(custom — output only, not scored)</span></div><div class="lc-card">${lcInputHtml(r.input)}</div>`
+      + `<div class="lc-label">Output</div><div class="lc-card"><pre>${esc(r.error ? r.error : fmtJson(r.actual))}</pre></div>`;
+  }
   const failed = !r.passed;
   return `<div class="lc-label">Input</div><div class="lc-card">${lcInputHtml(r.input)}</div>`
     + `<div class="lc-label">Output</div><div class="lc-card"><pre class="${failed ? "lc-out-fail" : ""}">${esc(r.error ? r.error : fmtJson(r.actual))}</pre></div>`
@@ -50,8 +59,11 @@ function lcDetailHtml(r) {
 
 function casePillsHtml(results, sel, cls) {
   return (results || []).map((r, i) => {
-    const icon = r.passed ? "✓" : "✕";
-    return `<button class="${cls || "case-pill"} ${r.passed ? "pass" : "fail"} ${i === sel ? "active" : ""}" data-idx="${i}" title="Case ${i + 1}${r.hidden ? " (hidden)" : ""} — ${r.passed ? "Passed" : "Failed"}"><span class="pill-icon">${icon}</span> Case ${i + 1}</button>`;
+    const isCustom = r.testCaseId === "custom";
+    const icon = r.passed === true ? "✓" : (r.passed === false ? "✕" : "•");
+    const state = r.passed === true ? "pass" : (r.passed === false ? "fail" : "custom");
+    const label = isCustom ? "Custom" : `Case ${i + 1}`;
+    return `<button class="${cls || "case-pill"} ${state} ${i === sel ? "active" : ""}" data-idx="${i}" title="${isCustom ? "Custom input — output only" : `Case ${i + 1}${r.hidden ? " (hidden)" : ""} — ${r.passed ? "Passed" : "Failed"}`}"><span class="pill-icon">${icon}</span> ${label}</button>`;
   }).join("");
 }
 
@@ -194,7 +206,7 @@ function renderResults(payload) {
     });
   });
   if(lastRunMeta) lastRunMeta.textContent = `${mode} · ${passed}/${total} · ${new Date().toLocaleTimeString()}`;
-  if(statusText) statusText.textContent = v.allPass ? "All tests passed ✓" : `${total-passed} test(s) failed`;
+  if(statusText) statusText.textContent = v.cls === "verdict-custom" ? "Custom run complete — output only" : (v.allPass ? "All tests passed ✓" : `${total-passed} test(s) failed`);
   window.__lastRun = { questionId: currentQuestion && currentQuestion.id, mode, passed, total, results, ts: Date.now() };
   if (payload.mode === "submit") { try { showSubmitResult(payload); } catch (e) { console.warn("result view failed", e); } }
   if(isPerfActive()) renderPerformance();

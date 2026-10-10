@@ -9,8 +9,10 @@ let attemptedSet = new Set();
 
 let manualSet = new Set();
 
+let bookmarkedSet = new Set();
+
 async function refreshSolvedState(){
-  solvedSet.clear(); attemptedSet.clear(); manualSet.clear();
+  solvedSet.clear(); attemptedSet.clear(); manualSet.clear(); bookmarkedSet.clear();
   const t = getToken();
   if(!t) return;
   try{
@@ -24,6 +26,13 @@ async function refreshSolvedState(){
       if(rm.ok){
         const mids = await rm.json();
         if(Array.isArray(mids)) mids.forEach(id=>{ manualSet.add(id); solvedSet.add(id); });
+      }
+    } catch {}
+    try {
+      const rb = await apiFetch("/api/bookmarks");
+      if(rb.ok){
+        const bids = await rb.json();
+        if(Array.isArray(bids)) bids.forEach(id=>bookmarkedSet.add(id));
       }
     } catch {}
     const r2 = await apiFetch("/api/submissions?limit=100");
@@ -64,6 +73,31 @@ async function toggleMarkDone(){
   }
 }
 
+
+async function toggleBookmark(){
+  if(!currentQuestion) return;
+  const t = getToken();
+  if(!t){ toast("Login to bookmark"); return; }
+  const qid = currentQuestion.id;
+  const on = bookmarkedSet.has(qid);
+  const btn = document.getElementById("bookmark-btn");
+  if(btn) btn.disabled = true;
+  try{
+    const res = await apiFetch(`/api/bookmarks/${encodeURIComponent(qid)}`, {
+      method: on ? "DELETE" : "POST"
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || "failed");
+    if(on) bookmarkedSet.delete(qid);
+    else bookmarkedSet.add(qid);
+    renderProblem();
+    renderList();
+    toast(on ? "Bookmark removed" : "Bookmarked — find it under Saved");
+  }catch(e){
+    toast("Failed: " + e.message);
+    renderProblem();
+  }
+}
 
 async function fetchQuestions() {
   if(questionListEl) questionListEl.innerHTML = `<div class="loading">Loading problems...</div>`;
@@ -116,9 +150,14 @@ function getFilteredSorted() {
   let list = [...questions];
   const diff = filterEl ? filterEl.value : "all";
   const tag = document.getElementById("tag-filter")?.value || "all";
+  const status = document.getElementById("status-filter")?.value || "all";
   const search = document.getElementById("search-input")?.value?.toLowerCase().trim() || "";
   const sort = document.getElementById("sort-select")?.value || "recent";
   if (diff !== "all") list = list.filter(q => q.difficulty === diff);
+  if (status === "saved") list = list.filter(q => bookmarkedSet.has(q.id));
+  else if (status === "solved") list = list.filter(q => solvedSet.has(q.id));
+  else if (status === "attempted") list = list.filter(q => !solvedSet.has(q.id) && attemptedSet.has(q.id));
+  else if (status === "todo") list = list.filter(q => !solvedSet.has(q.id) && !attemptedSet.has(q.id));
   if (tag !== "all") list = list.filter(q => (q.tags||[]).includes(tag));
   if (search) list = list.filter(q => q.title.toLowerCase().includes(search) || q.id.includes(search) || (q.tags||[]).join(" ").toLowerCase().includes(search));
   if (sort === "recent") list.sort((a,b)=> (b._createdAt||0)-(a._createdAt||0));
@@ -141,13 +180,14 @@ function renderList() {
       indicator = `<span class="q-indicator solved" title="${isMan ? "Manually marked done" : "Solved"}"><span class="dot-sm"></span> ${isMan ? "Done" : "Solved"}</span>`;
     }
     else if(attemptedSet.has(q.id)) indicator = `<span class="q-indicator attempted" title="Attempted"><span class="dot-sm"></span> Attempted</span>`;
+    const bm = bookmarkedSet.has(q.id) ? `<span class="q-indicator saved" title="Bookmarked">★</span>` : "";
     return `
     <div class="question-item ${currentQuestion && currentQuestion.id===q.id ? 'active':''}" data-id="${esc(q.id)}">
       <div class="q-title">${esc(q.title)}</div>
       <div class="q-meta">
         <span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span>
         <span>${(q.tags||[]).join(" · ")}</span>
-        ${indicator ? `<span style="margin-left:auto">${indicator}</span>` : ""}
+        ${indicator || bm ? `<span style="margin-left:auto;display:flex;gap:6px;align-items:center">${bm}${indicator}</span>` : ""}
       </div>
     </div>
   `}).join("") || `<div style="color:var(--muted);padding:10px;font-size:13px">No problems for filter</div>`;
@@ -171,6 +211,8 @@ async function loadQuestion(id) {
     currentQuestion = q;
     syncQuestionCtx();
     resetResultTab();
+    const customTa = document.getElementById("custom-input");
+    if (customTa) customTa.value = ""; // stale params from another question would 400
     renderProblem();
     // Starter code + history are independent fetches: run in parallel instead
     // of sequentially (each is a 0.3-1s DB roundtrip on hosted deployments).
@@ -195,6 +237,16 @@ function renderProblem() {
   const q = currentQuestion;
   const isSolved = solvedSet.has(q.id);
   const isManual = manualSet.has(q.id);
+  const isBookmarked = bookmarkedSet.has(q.id);
+  const me = getUser();
+  const canEdit = !!me && (me.role === "admin" || (q.addedBy != null && Number(q.addedBy) === Number(me.id)));
+  const editBtnsHtml = canEdit
+    ? `<button id="edit-q-btn" class="btn ghost" style="padding:6px 12px;font-size:12px" title="Edit this question">Edit</button><button id="delete-q-btn" class="btn ghost" style="padding:6px 12px;font-size:12px;color:var(--red)" title="Delete this question">Delete</button>`
+    : "";
+  const bookmarkBtnHtml = (() => {
+    if(!getToken()) return "";
+    return `<button id="bookmark-btn" class="btn ghost" style="padding:6px 10px;font-size:13px" title="${isBookmarked ? "Remove bookmark" : "Bookmark for later"}">${isBookmarked ? "★" : "☆"}</button>`;
+  })();
   const markBtnHtml = (() => {
     if(!getToken()) return "";
     if(isManual) return `<button id="mark-done-btn" class="btn secondary" style="padding:6px 12px;font-size:12px" title="Remove manual override">Marked Done (Undo)</button>`;
@@ -206,7 +258,7 @@ function renderProblem() {
     <div class="problem-meta">
       <span class="badge ${esc(q.difficulty)}">${esc(q.difficulty)}</span>
       <span style="color:var(--muted);font-size:13px">${(q.tags||[]).join(" · ")}</span>
-      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${markBtnHtml}</span>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">${bookmarkBtnHtml}${markBtnHtml}${editBtnsHtml}</span>
     </div>
     <div class="problem-statement">${q.problemStatement}</div>
     ${q.examples ? `<div class="examples"><h3>Examples</h3>${q.examples.map((ex,i)=>`
@@ -222,4 +274,29 @@ function renderProblem() {
   `;
   const markBtn = document.getElementById("mark-done-btn");
   if(markBtn) markBtn.addEventListener("click", toggleMarkDone);
+  const bookmarkBtn = document.getElementById("bookmark-btn");
+  if(bookmarkBtn) bookmarkBtn.addEventListener("click", toggleBookmark);
+  const editQBtn = document.getElementById("edit-q-btn");
+  if(editQBtn) editQBtn.addEventListener("click", () => openEditModal(currentQuestion));
+  const deleteQBtn = document.getElementById("delete-q-btn");
+  if(deleteQBtn) deleteQBtn.addEventListener("click", deleteCurrentQuestion);
+}
+
+async function deleteCurrentQuestion(){
+  if(!currentQuestion) return;
+  const qid = currentQuestion.id;
+  if(!confirm(`Delete "${currentQuestion.title}" permanently? Submissions for it will also be removed.`)) return;
+  try{
+    const res = await apiFetch(`/api/questions/${encodeURIComponent(qid)}`, { method: "DELETE" });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || "delete failed");
+    toast("Deleted " + qid);
+    invalidateCache("/api/questions");
+    currentQuestion = null;
+    await fetchQuestions();
+    if(questions.length) await loadQuestion(questions[0].id);
+    else if(problemViewEl) problemViewEl.innerHTML = `<div class="empty-state"><h2>No questions</h2><p>Add one to get started.</p></div>`;
+  }catch(e){
+    toast("Delete failed: " + e.message);
+  }
 }

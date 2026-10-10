@@ -133,9 +133,13 @@
         targetId=null; // me
       }
       // if other user but not logged in, still allow viewing if server permits anon? Our /api/users/:id/dashboard requires DB but not necessarily auth for numeric id, but we try with auth if present
-      let data, questions;
+      let data, questions, daily=null;
       try{
         [data, questions] = await Promise.all([fetchDashboard(targetId), fetchQuestionsSummaries()]);
+        try{
+          const rd=await fetch("/api/daily");
+          if(rd.ok) daily=await rd.json();
+        }catch{}
         hideLoader();
       }catch(e){
         hideLoader();
@@ -145,6 +149,30 @@
       const stats=data.stats;
       const solvedIds=new Set(data.solvedIds||[]);
       window.__DASHBOARD_READONLY = isOther;
+      // profile card (self: avatar/bio from /api/me refresh; other: public profile)
+      let profile=null;
+      if(!isOther && me){ profile={ username: me.username, avatar: me.avatar||null, bio: me.bio||null }; }
+      else if(isOther){
+        try{
+          const rp=await fetch(`/api/users/${encodeURIComponent(targetId)}/profile`,{headers:token?{Authorization:"Bearer "+token}:{}});
+          if(rp.ok) profile=await rp.json();
+        }catch{}
+      }
+      const avatarHtml=profile&&profile.avatar?`<img src="${esc(profile.avatar)}" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display='none'">`:`<span style="width:64px;height:64px;border-radius:50%;background:var(--panel2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:22px">${esc((profile?.username||me?.username||"?").slice(0,1).toUpperCase())}</span>`;
+      const profileCard=`
+        <div class="list-card" style="margin-bottom:16px;display:flex;gap:14px;align-items:flex-start">
+          ${avatarHtml}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:17px;font-weight:800">${esc(profile?.username||me?.username||userLabel)}</div>
+            <div style="color:var(--muted);font-size:13px;margin-top:4px;white-space:pre-wrap;word-break:break-word">${profile&&profile.bio?esc(profile.bio):(isOther?"No bio yet.":"Add a bio so others know you.")}</div>
+            ${!isOther?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button id="profile-edit-btn" class="btn ghost" style="padding:5px 10px;font-size:12px">Edit profile</button></div>
+            <div id="profile-form" class="hidden" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+              <label style="font-size:12px;color:var(--muted)">Avatar image URL<input id="profile-avatar" placeholder="https://..." style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;width:100%"></label>
+              <label style="font-size:12px;color:var(--muted)">Bio (max 500)<textarea id="profile-bio" rows="2" maxlength="500" placeholder="Short bio..." style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;width:100%;resize:vertical"></textarea></label>
+              <div style="display:flex;gap:8px"><button id="profile-save-btn" class="btn primary" style="padding:6px 12px;font-size:12px">Save</button><span id="profile-msg" style="font-size:12px;color:var(--muted)"></span></div>
+            </div>`:""}
+          </div>
+        </div>`;
       const userLabel = isOther ? `User #${esc(targetId)}` : (me? esc(me.username):"You");
       const unsolved = questions.filter(q=>!solvedIds.has(q.id));
 
@@ -190,6 +218,30 @@
           <h1 style="font-size:22px">${isOther? `Dashboard — ${userLabel}` : `Dashboard`}${isOther? ' <span style="color:var(--muted);font-size:13px;font-weight:400">(read-only)</span>':''}</h1>
           <span style="color:var(--muted);font-size:13px">${stats.solved} solved · ${stats.total} total</span>
         </div>
+        ${daily?`<div class="list-card" style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-color:var(--accent)">
+          <span style="font-size:20px">📅</span>
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:12px;color:var(--muted)">Daily challenge · ${esc(daily.date)} (UTC)${solvedIds.has(daily.questionId)?' · <span style="color:var(--green);font-weight:700">solved ✓</span>':""}</div>
+            <div style="font-size:15px;font-weight:800;margin-top:2px"><a href="index.html#${esc(daily.questionId)}" class="q-link">${esc(daily.title)}</a> <span class="badge ${esc(daily.difficulty)}">${esc(daily.difficulty)}</span></div>
+          </div>
+          <a href="index.html#${esc(daily.questionId)}" class="btn primary" style="padding:6px 14px;text-decoration:none">Solve →</a>
+        </div>`:""}
+        ${profileCard}
+        ${!isOther?`<div class="list-card" style="margin-bottom:16px">
+          <h3>Account</h3>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+              <label style="font-size:12px;color:var(--muted)">Current password<input id="pw-cur" type="password" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;display:block;margin-top:4px"></label>
+              <label style="font-size:12px;color:var(--muted)">New password (min 6)<input id="pw-new" type="password" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;display:block;margin-top:4px"></label>
+              <button id="pw-change-btn" class="btn secondary" style="padding:7px 12px;font-size:12px">Change password</button>
+              <span id="pw-msg" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="export-btn" class="btn ghost" style="padding:6px 12px;font-size:12px">⬇ Export my data (JSON)</button>
+              <button id="delete-acct-btn" class="btn ghost" style="padding:6px 12px;font-size:12px;color:var(--red);border-color:rgba(255,55,87,0.4)">Delete account…</button>
+            </div>
+          </div>
+        </div>`:""}
         <div class="dash-grid">
           <div class="ring-card">
             ${renderRing(stats.solved, stats.total)}
@@ -222,6 +274,86 @@
         <div class="list-card" style="margin-top:16px"><h3>Added Questions <span style="color:var(--muted);font-weight:400">(${added.length})</span></h3>${addedHtml}</div>
         ${isOther? `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Read-only view — code history hidden for privacy.</div>` : `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Your submissions are private and scoped per user. Code autosaves every 10s to DB with your token.</div>`}
       `;
+      if(!isOther){
+        const pwb=document.getElementById("pw-change-btn");
+        if(pwb) pwb.addEventListener("click", async ()=>{
+          const msg=document.getElementById("pw-msg");
+          const cur=document.getElementById("pw-cur").value;
+          const nw=document.getElementById("pw-new").value;
+          pwb.disabled=true;
+          try{
+            const r=await fetch("/api/me/password",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({currentPassword:cur,newPassword:nw})});
+            const d=await r.json().catch(()=>({}));
+            if(!r.ok) throw new Error(d.error||"change failed");
+            if(msg){ msg.textContent="Password changed ✓"; }
+            document.getElementById("pw-cur").value="";
+            document.getElementById("pw-new").value="";
+            toast("Password changed");
+          }catch(e){
+            if(msg) msg.textContent="Failed: "+e.message;
+            toast("Password change failed: "+e.message);
+          }finally{ pwb.disabled=false; }
+        });
+        const exb=document.getElementById("export-btn");
+        if(exb) exb.addEventListener("click", async ()=>{
+          try{
+            const r=await fetch("/api/me/export",{headers:authHeaders({})});
+            if(!r.ok) throw new Error("export failed ("+r.status+")");
+            const blob=await r.blob();
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement("a");
+            a.href=url; a.download="dsa-export.json"; a.click();
+            setTimeout(()=>URL.revokeObjectURL(url), 5000);
+            toast("Export downloaded");
+          }catch(e){ toast("Export failed: "+e.message); }
+        });
+        const delb=document.getElementById("delete-acct-btn");
+        if(delb) delb.addEventListener("click", async ()=>{
+          const pw=prompt("Type your password to PERMANENTLY delete your account, submissions, saves and bookmarks. Questions you added stay (anonymized).");
+          if(pw===null) return;
+          if(!pw){ toast("Password required"); return; }
+          if(!confirm("Last chance — delete everything?")) return;
+          try{
+            const r=await fetch("/api/me",{method:"DELETE",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({password:pw})});
+            const d=await r.json().catch(()=>({}));
+            if(!r.ok) throw new Error(d.error||"delete failed");
+            clearAuth();
+            toast("Account deleted");
+            setTimeout(()=>{ location.href="register.html"; }, 800);
+          }catch(e){ toast("Delete failed: "+e.message); }
+        });
+        const eb=document.getElementById("profile-edit-btn");
+        if(eb) eb.addEventListener("click",()=>{
+          const f=document.getElementById("profile-form");
+          if(!f) return;
+          f.classList.toggle("hidden");
+          if(!f.classList.contains("hidden")){
+            const meNow=getUser()||{};
+            document.getElementById("profile-avatar").value=meNow.avatar||"";
+            document.getElementById("profile-bio").value=meNow.bio||"";
+          }
+        });
+        const sb=document.getElementById("profile-save-btn");
+        if(sb) sb.addEventListener("click", async ()=>{
+          const msg=document.getElementById("profile-msg");
+          const avatar=document.getElementById("profile-avatar").value.trim();
+          const bio=document.getElementById("profile-bio").value;
+          sb.disabled=true;
+          try{
+            const r=await fetch("/api/me",{method:"PUT",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({avatar,bio})});
+            const d=await r.json().catch(()=>({}));
+            if(!r.ok) throw new Error(d.error||"save failed");
+            const cur=getUser()||{};
+            localStorage.setItem("user",JSON.stringify({...cur,avatar:d.avatar||null,bio:d.bio||null}));
+            if(msg){ msg.textContent="Saved ✓"; }
+            toast("Profile updated");
+            setTimeout(()=>init(), 600);
+          }catch(e){
+            if(msg) msg.textContent="Failed: "+e.message;
+            toast("Profile save failed: "+e.message);
+          }finally{ sb.disabled=false; }
+        });
+      }
     }
     init();
   </script>

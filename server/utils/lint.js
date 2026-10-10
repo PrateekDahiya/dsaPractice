@@ -190,6 +190,49 @@ function parseGccLine(line, tmpBase) {
   return { line: parseInt(m[2], 10) || 1, col: parseInt(m[3], 10) || 1, message: `${m[4]}: ${m[5]}`.slice(0, 500), severity: m[4] === 'error' ? 'error' : 'warning' };
 }
 
+// Compact human-readable summary of a FAILED g++ compile for execute paths
+// (Run/Submit), reusing the lint line-mapping. Unlike lintCpp this filters to
+// diagnostics located in the USER's code (drops STL backtrace noise) and caps
+// at maxDiags entries. Never throws; falls back to the first stderr line.
+function formatGccError(stderrText, opts = {}) {
+  try {
+    const { tmpBase = '', hasInclude = true, userCode = '', maxDiags = 5 } = opts || {};
+    const userLines = String(userCode || '').split('\n');
+    const prefixLines = hasInclude ? 0 : 3; // header + blank line prepended when user omitted #include
+    const base = tmpBase ? String(tmpBase).split(/[\\/]/).pop() : '';
+    const diags = [];
+    for (const rawLine of String(stderrText || '').split('\n').slice(0, 30)) {
+      const t = rawLine.trim();
+      if (!t) continue;
+      const d = parseGccLine(t, tmpBase);
+      if (!d) continue;
+      // keep only diagnostics from the compiled TU itself (drops /usr/include STL noise)
+      if (base) {
+        const filePart = (t.match(/^(.*?):(\d+)/) || [])[1] || '';
+        if (!filePart.includes(base)) continue;
+      }
+      if (!hasInclude) d.line = Math.max(1, d.line - prefixLines);
+      // clamp driver-section lines to the user's code range
+      if (d.line > userLines.length) continue;
+      if (/expected\s+['"]?[;,]['"]?(\s+or\s+['"]?[;,]['"]?)?\s+before/i.test(d.message)) {
+        for (let L = Math.min(d.line - 1, userLines.length); L >= 1; L--) {
+          const u = (userLines[L - 1] || '');
+          if (u.trim() !== '') { d.line = L; d.col = u.length + 1; break; }
+        }
+      }
+      diags.push(d);
+      if (diags.length >= maxDiags) break;
+    }
+    if (!diags.length) {
+      const first = String(stderrText || '').split('\n').map((l) => l.trim()).filter(Boolean)[0];
+      return 'Compile Error:\n' + (first || 'unknown compile error').slice(0, 500);
+    }
+    return 'Compile Error:\n' + diags.map((d) => `line ${d.line}: ${d.message}`).join('\n');
+  } catch {
+    return 'Compile Error:\n' + String(stderrText || '').split('\n')[0].slice(0, 500);
+  }
+}
+
 async function lintCpp(code, ROOT) {
   const diags = staticHints(code, 'cpp');
   const compiler = resolveCompiler(ROOT);
@@ -281,4 +324,4 @@ async function lint(code, language, ROOT) {
   throw new Error('Unsupported language');
 }
 
-module.exports = { lint, ensureBitsPch, getPchPath, isPchAvailable, resolveCompiler };
+module.exports = { lint, ensureBitsPch, getPchPath, isPchAvailable, resolveCompiler, parseGccLine, formatGccError };
