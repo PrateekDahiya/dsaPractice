@@ -1554,6 +1554,34 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, ids, 200);
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
   }
+  // Bookmarks: save/unsave questions for later
+  if (pathname === "/api/bookmarks" && req.method === "GET") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      const ids = dbReady && db.getBookmarkIds ? await db.getBookmarkIds(u.id) : [];
+      return sendJson(res, ids, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname.match(/^\/api\/bookmarks\/[^/]+$/) && (req.method === "POST" || req.method === "DELETE")) {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    const qid = decodeURIComponent(pathname.split("/").filter(Boolean)[2]);
+    try {
+      await ensureDb();
+      if (!dbReady || !db.addBookmark) return sendJson(res, { error: "DB not ready" }, 500);
+      const q = await getQuestionById(qid);
+      if (!q) return sendJson(res, { error: "Question not found" }, 404);
+      if (req.method === "POST") {
+        await db.addBookmark(u.id, qid);
+        return sendJson(res, { ok: true, bookmarked: true }, 200);
+      } else {
+        await db.removeBookmark(u.id, qid);
+        return sendJson(res, { ok: true, bookmarked: false }, 200);
+      }
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname.match(/^\/api\/questions\/[^/]+\/mark-done$/) && (req.method === "POST" || req.method === "DELETE")) {
     const u = requireAuth(req, res);
     if (!u) return;

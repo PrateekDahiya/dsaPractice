@@ -44,6 +44,7 @@
       <select id="tag-filter" title="Tag" style="flex:1;min-width:120px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px"><option value="all">All tags</option></select>
       <select id="status-filter" title="My status" style="background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px">
         <option value="all">All statuses</option>
+        <option value="saved">★ Saved by me</option>
         <option value="solved">Solved by me</option>
         <option value="attempted">Attempted</option>
         <option value="todo">Todo</option>
@@ -99,7 +100,7 @@
     function showLoader(){ const el=document.getElementById("top-loader"); if(el){ el.classList.remove("done"); el.classList.add("active"); void el.offsetWidth; el.style.width="70%"; } }
     function hideLoader(){ const el=document.getElementById("top-loader"); if(el){ el.style.width="100%"; el.classList.add("done"); setTimeout(()=>{ el.classList.remove("active","done"); el.style.width="0%"; },300); } }
 
-    let questions=[], statsMap={}, solvedSet=new Set(), attemptedSet=new Set();
+    let questions=[], statsMap={}, solvedSet=new Set(), attemptedSet=new Set(), savedSet=new Set();
     async function loadAll(){
       const [qs, st] = await Promise.all([
         fetch("/api/questions").then(r=>{ if(!r.ok) throw new Error("questions failed"); return r.json(); }),
@@ -114,6 +115,10 @@
           if(r1.ok){ (await r1.json()).forEach(id=>solvedSet.add(id)); }
           const r2=await fetch("/api/submissions?limit=100",{headers:authHeaders({})});
           if(r2.ok){ (await r2.json()).forEach(s=>{ if(!solvedSet.has(s.questionId)) attemptedSet.add(s.questionId); }); }
+          try{
+            const r3=await fetch("/api/bookmarks",{headers:authHeaders({})});
+            if(r3.ok){ (await r3.json()).forEach(id=>savedSet.add(id)); }
+          }catch{}
         }catch{}
       }
       const tags=[...new Set(questions.flatMap(q=>q.tags||[]))].sort();
@@ -129,7 +134,8 @@
       if(diff!=="all") list=list.filter(q=>q.difficulty===diff);
       if(tag!=="all") list=list.filter(q=>(q.tags||[]).includes(tag));
       if(search) list=list.filter(q=>q.title.toLowerCase().includes(search)||q.id.includes(search)||(q.tags||[]).join(" ").toLowerCase().includes(search));
-      if(status==="solved") list=list.filter(q=>solvedSet.has(q.id));
+      if(status==="saved") list=list.filter(q=>savedSet.has(q.id));
+      else if(status==="solved") list=list.filter(q=>solvedSet.has(q.id));
       else if(status==="attempted") list=list.filter(q=>!solvedSet.has(q.id)&&attemptedSet.has(q.id));
       else if(status==="todo") list=list.filter(q=>!solvedSet.has(q.id)&&!attemptedSet.has(q.id));
       const st=id=>statsMap[id]||{attempted:0,submissions:0,solved:0};

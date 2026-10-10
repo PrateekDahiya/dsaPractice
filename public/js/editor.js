@@ -123,6 +123,8 @@ document.getElementById("sort-select")?.addEventListener("change", renderList);
 
 document.getElementById("tag-filter")?.addEventListener("change", renderList);
 
+document.getElementById("status-filter")?.addEventListener("change", renderList);
+
 document.getElementById("search-input")?.addEventListener("input", renderList);
 
 function populateTagFilter(){

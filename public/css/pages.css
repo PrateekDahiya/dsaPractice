@@ -118,6 +118,7 @@
 .q-indicator .dot-sm { width:8px; height:8px; border-radius:50%; display:inline-block; }
 .q-indicator.solved .dot-sm { background:#00b8a3; }
 .q-indicator.attempted .dot-sm { background:#ffa116; }
+.q-indicator.saved { color:var(--accent); }
 
 /* Leaderboard */
 .lb-wrap{ padding:20px; max-width:900px; margin:0 auto; width:100%; overflow-y:auto; }
