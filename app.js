@@ -1066,11 +1066,18 @@ async function execute(mode) {
     };
     // fire sequentially so each renders as soon as it resolves (first pays compile ~1s, rest cached instant)
     for(let i=0;i<total;i++){
-      const resCase = await apiFetch("/api/execute/case", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId: currentQuestion.id, code, language: currentLang, mode, index: i })
-      });
+      // transient 429 (concurrent compile / background PCH build) => backoff-retry, not an error
+      let resCase = null;
+      for(let attempt=0; attempt<6; attempt++){
+        resCase = await apiFetch("/api/execute/case", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ questionId: currentQuestion.id, code, language: currentLang, mode, index: i })
+        });
+        if(resCase.status!==429 || attempt===5) break;
+        if(statusText) statusText.textContent = `Server busy, retrying case ${i+1} in 3s... (attempt ${attempt+1}/5)`;
+        await new Promise(r=>setTimeout(r, 3000));
+      }
       if(!resCase.ok){
         const err = await resCase.json().catch(()=>({error: resCase.statusText}));
         throw new Error(err.error||"case failed");

@@ -35,6 +35,7 @@ let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
 // ---------- lint guards: single-flight + cache + rate limit (OOM fix for /api/lint) ----------
 const lintStats = { total: 0, cacheHits: 0, rateLimited: 0, execRejected: 0 };
 let lintInflightCpp = 0; // max 1 concurrent g++ lint process
+let lastLintEnd = 0; // last finished g++ lint; keeps lazy PCH builds out of active typing windows
 const lintCache = new Map(); // sha256(code+language) -> { diagnostics, ts }
 const LINT_CACHE_TTL_MS = 60 * 1000;
 const LINT_CACHE_MAX = parseInt(process.env.LINT_CACHE_MAX || "100", 10) || 100;
@@ -45,6 +46,7 @@ const EXEC_MAX_CPP = parseInt(process.env.EXEC_MAX_CPP || "1", 10) || 1;
 const EXEC_MAX_PYTHON = parseInt(process.env.EXEC_MAX_PYTHON || "2", 10) || 2;
 const EXEC_MAX_TOTAL = parseInt(process.env.EXEC_MAX_TOTAL || "3", 10) || 3;
 let execInflightCpp = 0, execInflightPython = 0, execInflightTotal = 0;
+let lastExecEnd = 0; // updated on every gate release; gates lazy PCH builds to idle windows
 const DISABLE_CPP = process.env.DISABLE_CPP === "1";
 const ENABLE_PCH = process.env.ENABLE_PCH === "1";
 const MAX_BODY_BYTES = 60000;
@@ -62,6 +64,7 @@ function execRelease(kind) {
   execInflightTotal = Math.max(0, execInflightTotal - 1);
   if (kind === "cpp") execInflightCpp = Math.max(0, execInflightCpp - 1);
   if (kind === "python") execInflightPython = Math.max(0, execInflightPython - 1);
+  lastExecEnd = Date.now();
 }
 // Sweep stale rate-limit entries so per-IP maps can't grow forever (slow leak/DoS).
 setInterval(() => {
@@ -103,6 +106,44 @@ function exeCacheDir() {
   const d = path.join(os.tmpdir(), "dsa_cache");
   try { fs.mkdirSync(d, { recursive: true }); } catch {}
   return d;
+}
+// ---------- lazy PCH: precompiled bits/stdc++.h for ALL g++ invocations ----------
+// Built once in the background (never at boot, so no startup RAM spike), holding
+// the cpp gate slot so it can never run concurrently with a user compile (OOM-safe).
+// Every compile site appends pchCompileArgs(); when no .gch exists it is just [].
+function pchPath() {
+  return path.join(os.tmpdir(), "dsa_pch", "bits", "stdc++.h.gch");
+}
+function pchExists() {
+  try { return fs.existsSync(pchPath()); } catch { return false; }
+}
+function pchCompileArgs() {
+  if (!ENABLE_PCH || !pchExists()) return [];
+  try { return ["-include-pch", pchPath()]; } catch { return []; }
+}
+let pchBuilding = false;
+function maybeBuildPch() {
+  // Self-throttling: only when enabled, missing, idle (>30s since last exec/lint g++),
+  // and no g++ currently running. Safe to call from any cpp entry point.
+  if (!ENABLE_PCH || pchBuilding || pchExists()) return;
+  if (execInflightTotal !== 0 || lintInflightCpp !== 0) return;
+  if (Date.now() - lastExecEnd < 30000) return;
+  if (Date.now() - lastLintEnd < 30000) return;
+  pchBuilding = true;
+  if (!execTryAcquire("cpp")) { pchBuilding = false; return; }
+  (async () => {
+    try {
+      const { ensureBitsPch } = require("./server/utils/lint");
+      const p = await ensureBitsPch(ROOT);
+      if (p) console.log("PCH ready (lazy):", p);
+      else console.warn("lazy PCH build produced nothing (continuing without PCH)");
+    } catch (e) {
+      console.warn("lazy PCH build skipped:", (e && e.message) || e);
+    } finally {
+      execRelease("cpp");
+      pchBuilding = false;
+    }
+  })();
 }
 function exeCachePrune() {
   try {
@@ -659,7 +700,7 @@ int main(){
     let compiler = "g++";
     for (const p of localGpps) if (fs.existsSync(p)) { compiler = p; break; }
     // Low-memory flags: -O0 uses far less RAM than -O2; -s strips symbols (smaller exe).
-    const compile = spawn(compiler, ["-std=c++17", "-O0", "-s", tmpCpp, "-o", exe]);
+    const compile = spawn(compiler, ["-std=c++17", "-O0", "-s", ...pchCompileArgs(), tmpCpp, "-o", exe]);
     let cErr = "";
     compile.stderr.on("data", d => { if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
     compile.on("error", err => {
@@ -841,7 +882,7 @@ int main(){
   const localGpps = [path.join(ROOT,"tools","mingw64","bin","g++.exe"),path.join(ROOT,"tools","w64devkit","bin","g++.exe"),path.join(ROOT,"tools","gcc","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","C:\\tools\\mingw64\\bin\\g++.exe","C:\\tools\\w64devkit\\bin\\g++.exe"];
   let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
   return new Promise((resolve, reject) => {
-    const compile = spawn(compiler, ["-std=c++17","-O0","-s",tmpCpp,"-o",exe]);
+    const compile = spawn(compiler, ["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]);
     let cErr=""; compile.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
     compile.on("error", err=>{ try{fs.unlinkSync(tmpCpp);}catch{}; if(err.code==="ENOENT") return reject(new Error("g++ not found")); reject(new Error("Compile spawn error: "+err.message)); });
     compile.on("close", async cCode=>{ if(cCode!==0){ try{fs.unlinkSync(tmpCpp);}catch{}; return reject(new Error("Compile Error:\\n"+cErr)); }
@@ -1595,19 +1636,23 @@ const server = http.createServer(async (req, res) => {
             await new Promise((res,rej)=>{ py.on("close", c=>{ untrack(py); try{fs.unlinkSync(tmpFile);}catch{}; if(outBuf.trim()){ const t=outBuf.trim(); if(t.startsWith("__PEAK_KB__")){ const pk=parseInt(t.slice(11),10); if(!isNaN(pk)) streamMemKb=Math.max(streamMemKb||0,pk); } else { try{ const actual=JSON.parse(t); const tc=testCases.shift(); if(tc) sendOne(tc, actual, null, 0, null); }catch{} } } if(c!==0 && c!==null) { /* already handled */ } res(); }); py.on("error", (e)=>{ untrack(py); rej(e); }); });
           }catch(e){ for(const tc of testCases) sendOne(tc, null, e.message, 0, null); }
         } else if (language==="cpp") {
-          // Compile once, then stream each case as exe prints (endl flushes)
+          // Compile once (ALL cases embedded, mode-independent hash v3), then run
+          // each mode case by absolute index. Exe startup is milliseconds, so
+          // streaming granularity is preserved and Run->Submit shares the binary.
+          const full=[...visible, ...hidden];
+          const absOf=(tc)=>full.findIndex(t=>t.id===tc.id);
           try{
             const fnName = q.cppFunctionName || q.functionName;
             const params = q.params;
             const isReverse = q.id==="reverse-string";
-            const isCompositeSample = testCases[0] && testCases[0].expectedOutput && typeof testCases[0].expectedOutput==="object" && !Array.isArray(testCases[0].expectedOutput) && ("k" in testCases[0].expectedOutput);
+            const isCompositeSample = full[0] && full[0].expectedOutput && typeof full[0].expectedOutput==="object" && !Array.isArray(full[0].expectedOutput) && ("k" in full[0].expectedOutput);
             const isInPlaceVoid = isReverse || q.id==="move-zeroes";
             const batchDecls = params.map(p=>{
-              const firstVal = testCases[0].input[p];
+              const firstVal = full[0].input[p];
               const baseType = cppTypeFor(firstVal);
-              return `vector<${baseType}> _batch_${p} = {${testCases.map(tc=>jsonToCppLiteral(tc.input[p])).join(", ")}};`;
+              return `vector<${baseType}> _batch_${p} = {${full.map(tc=>jsonToCppLiteral(tc.input[p])).join(", ")}};`;
             }).join("\n  ");
-            const n = testCases.length;
+            const n = full.length;
             const hasInclude = code.includes("#include");
             const header = hasInclude ? "" : '#include <bits/stdc++.h>\nusing namespace std;\n';
             const printHelpers = `\ntemplate<typename T> void printJsonVal(const T& v);\nvoid printJsonVal(int v){ cout << v; }\nvoid printJsonVal(double v){ cout << v; }\nvoid printJsonVal(bool v){ cout << (v?"true":"false"); }\nvoid printJsonVal(const string& v){ cout << '"' << v << '"'; }\nvoid printJsonVal(char v){ cout << '"' << v << '"'; }\ntemplate<typename T> void printJsonVal(const vector<T>& v){ cout << "["; for(size_t i=0;i<v.size();++i){ if(i) cout << ","; printJsonVal(v[i]); } cout << "]"; }\n`;
@@ -1622,7 +1667,7 @@ const server = http.createServer(async (req, res) => {
               driver=`\nint main(int argc, char** argv){\n  ${batchDecls}\n  ${idxSupport}\n  for(int i=_s;i<_e;i++){\n    auto _ret = ${fnName}(${callArgs});\n    printJsonVal(_ret); cout << endl;\n  }\n  return 0;\n}\n`;
             }
             const crypto = require("crypto");
-            const hash = crypto.createHash("sha256").update(code+"|"+q.id+"|"+mode+"|v2-index").digest("hex").slice(0,16);
+            const hash = crypto.createHash("sha256").update(code+"|"+q.id+"|v3-all").digest("hex").slice(0,16);
             const cacheDir = exeCacheDir();
             const exe=path.join(cacheDir, `dsa_${hash}.exe`);
             const tmpCpp=path.join(os.tmpdir(), `dsa_stream_${Date.now()}_${Math.random().toString(36).slice(2)}.cpp`);
@@ -1633,7 +1678,7 @@ const server = http.createServer(async (req, res) => {
               fs.writeFileSync(tmpCpp, header+"\n"+code+"\n"+printHelpers+"\n"+driver, "utf8");
               let cErr="";
               await new Promise((res,rej)=>{
-                const comp=spawn(compiler, ["-std=c++17","-O0","-s",tmpCpp,"-o",exe]);
+                const comp=spawn(compiler, ["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]);
                 comp.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); });
                 comp.on("close",c=>{ exeCachePrune(); c===0?res():rej(new Error("Compile Error:\\n"+cErr)); });
                 comp.on("error",e=>rej(new Error("Compile spawn error: "+e.message)));
@@ -1645,44 +1690,40 @@ const server = http.createServer(async (req, res) => {
             const binDir=path.dirname(compiler);
             const runEnv={...process.env, PATH: binDir+path.delimiter+process.env.PATH};
             const useTime=process.env.USE_TIME_V === "0" ? false : hasTimeV();
-            const run=useTime?spawn("/usr/bin/time",["-v",exe],{env: runEnv}):spawn(exe, [], {env: runEnv});
-            activeKids.add(run);
-            let outBuf="", rErr="";
-            let idx=0;
-            const t0=Date.now();
-            run.stdout.on("data", d=>{
-              outBuf+=d.toString();
-              if (outBuf.length > MAX_CHILD_BYTES * 2) outBuf = outBuf.slice(-MAX_CHILD_BYTES);
-              let lines=outBuf.split("\n");
-              outBuf=lines.pop();
-              for(const line of lines){
-                if(!line.trim()) continue;
-                try{
-                  const actual=JSON.parse(line);
-                  const tc=testCases[idx++];
-                  if(tc) sendOne(tc, actual, null, Date.now()-t0, null);
-                }catch{}
-              }
-            });
-            run.stderr.on("data",d=>{ if (rErr.length < MAX_CHILD_BYTES) rErr += d.toString().slice(0, MAX_CHILD_BYTES - rErr.length); });
-            await new Promise((res,rej)=>{
-              const kill=setTimeout(()=>{try{run.kill();}catch{}; rej(new Error("Time Limit Exceeded"));},8000);
-              run.on("close",c=>{
-                clearTimeout(kill);
-                untrack(run);
-                if(useTime){ const m=rErr.match(/Maximum resident set size \(kbytes\):\s*(\d+)/); if(m) streamMemKb=Math.max(streamMemKb||0,parseInt(m[1],10)); }
-                if(outBuf.trim() && idx<testCases.length){
-                  try{ const actual=JSON.parse(outBuf.trim()); const tc=testCases[idx++]; if(tc) sendOne(tc, actual, null, Date.now()-t0, null); }catch{}
-                }
-                // keep cached exe for reruns (do NOT delete)
-                if(c!==0 && idx<testCases.length){
-                  // remaining cases failed
-                  for(let j=idx;j<testCases.length;j++) sendOne(testCases[j], null, rErr||`exit ${c}`, 0, null);
-                }
-                res();
+            for (const tc of testCases) {
+              const ai=absOf(tc);
+              const t0=Date.now();
+              await new Promise((res2)=>{
+                const args=[String(ai)];
+                const run=useTime?spawn("/usr/bin/time",["-v",exe,...args],{env: runEnv}):spawn(exe,args,{env: runEnv});
+                activeKids.add(run);
+                let out="",rErr="";
+                run.stdout.on("data",d=>{ if(out.length<MAX_CHILD_BYTES) out+=d.toString().slice(0,MAX_CHILD_BYTES-out.length); });
+                run.stderr.on("data",d=>{ if(rErr.length<MAX_CHILD_BYTES) rErr+=d.toString().slice(0,MAX_CHILD_BYTES-rErr.length); });
+                const kill=setTimeout(()=>{ try{run.kill();}catch{}; sendOne(tc,null,"Time Limit Exceeded (C++ >3s)",Date.now()-t0,null); res2(); },3500);
+                const memFromTime=()=>{
+                  if(!useTime) return null;
+                  const m=rErr.match(/Maximum resident set size \(kbytes\):\s*(\d+)/);
+                  return m?parseInt(m[1],10):null;
+                };
+                run.on("close",c=>{
+                  clearTimeout(kill);
+                  untrack(run);
+                  if(c!==0){ sendOne(tc,null,rErr.trim().slice(0,500)||`exit ${c}`,Date.now()-t0,memFromTime()); }
+                  else {
+                    try{
+                      const line=out.trim().split("\n").filter(Boolean)[0];
+                      const actual=JSON.parse(line);
+                      const mem=memFromTime();
+                      if(mem!=null) streamMemKb=Math.max(streamMemKb||0,mem);
+                      sendOne(tc,actual,null,Date.now()-t0,mem);
+                    }catch{ sendOne(tc,null,"Invalid C++ output (not JSON): "+out.trim().slice(0,500),Date.now()-t0,memFromTime()); }
+                  }
+                  res2();
+                });
+                run.on("error",(e)=>{ clearTimeout(kill); untrack(run); sendOne(tc,null,"Run error: "+e.message,Date.now()-t0,null); res2(); });
               });
-              run.on("error",(e)=>{ clearTimeout(kill); untrack(run); rej(e); });
-            });
+            }
           }catch(e){
             for(const tc of testCases) sendOne(tc, null, e.message, 0, null);
           }
@@ -1731,21 +1772,25 @@ const server = http.createServer(async (req, res) => {
           if(language==="javascript"){ const hb=process.memoryUsage().heapUsed; actual=runJS(code,q,tc.input,tc.expectedOutput); memKb=jsHeapKb(hb); }
           else if(language==="python") ({ actual, memKb } = await runPython(code,q,tc.input,tc.expectedOutput));
           else if(language==="cpp"){
-            // reuse cached batch exe with index arg (compile once, run single)
+            // Reuse cached exe with index arg (compile once, run single).
+            // The binary embeds ALL cases (visible+hidden) and the hash ignores
+            // mode, so Run -> Submit with unchanged code compiles exactly once.
             const crypto=require("crypto");
-            const hash=crypto.createHash("sha256").update(code+"|"+q.id+"|"+mode+"|v2-index").digest("hex").slice(0,16);
+            const hash=crypto.createHash("sha256").update(code+"|"+q.id+"|v3-all").digest("hex").slice(0,16);
             const cacheDir=exeCacheDir();
             const exe=path.join(cacheDir,`dsa_${hash}.exe`);
+            const full=[...visible, ...hidden];
+            const absIndex=full.findIndex(t=>t.id===tc.id);
             if(!fs.existsSync(exe)){
               // compile batch exe on-demand (same driver as stream, with index support)
               const fnName=q.cppFunctionName||q.functionName;
               const params=q.params;
-              const batchDecls=params.map(p=>{ const v=all[0].input[p]; return `vector<${cppTypeFor(v)}> _batch_${p} = {${all.map(t=>jsonToCppLiteral(t.input[p])).join(", ")}};`; }).join("\n  ");
-              const n=all.length;
+              const batchDecls=params.map(p=>{ const v=full[0].input[p]; return `vector<${cppTypeFor(v)}> _batch_${p} = {${full.map(t=>jsonToCppLiteral(t.input[p])).join(", ")}};`; }).join("\n  ");
+              const n=full.length;
               const hasInclude=code.includes("#include");
               const header=hasInclude?"":'#include <bits/stdc++.h>\nusing namespace std;\n';
               const printHelpers=`\ntemplate<typename T> void printJsonVal(const T& v);\nvoid printJsonVal(int v){ cout << v; }\nvoid printJsonVal(double v){ cout << v; }\nvoid printJsonVal(bool v){ cout << (v?"true":"false"); }\nvoid printJsonVal(const string& v){ cout << '"' << v << '"'; }\nvoid printJsonVal(char v){ cout << '"' << v << '"'; }\ntemplate<typename T> void printJsonVal(const vector<T>& v){ cout << "["; for(size_t i=0;i<v.size();++i){ if(i) cout << ","; printJsonVal(v[i]); } cout << "]"; }\n`;
-              const isComp=all[0].expectedOutput && typeof all[0].expectedOutput==="object" && !Array.isArray(all[0].expectedOutput) && ("k" in all[0].expectedOutput);
+              const isComp=full[0].expectedOutput && typeof full[0].expectedOutput==="object" && !Array.isArray(full[0].expectedOutput) && ("k" in full[0].expectedOutput);
               const isInP=q.id==="reverse-string"||q.id==="move-zeroes";
               const idxSup=`int _s=0,_e=${n}; if(argc>1){_s=atoi(argv[1]); _e=_s+1; if(_s<0||_s>=${n}) return 0;}`;
               let driver;
@@ -1757,14 +1802,14 @@ const server = http.createServer(async (req, res) => {
               const localGpps=[path.join(ROOT,"tools","mingw64","bin","g++.exe"),"C:\\mingw64\\bin\\g++.exe","g++"];
               let compiler="g++"; for(const p of localGpps) if(fs.existsSync(p)){compiler=p;break;}
               let cErr="";
-              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error("Compile Error:\\n"+cErr)); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
+              await new Promise((rs,rj)=>{ const c=spawn(compiler,["-std=c++17","-O0","-s",...pchCompileArgs(),tmpCpp,"-o",exe]); c.stderr.on("data",d=>{ if (cErr.length < MAX_CHILD_BYTES) cErr += d.toString().slice(0, MAX_CHILD_BYTES - cErr.length); }); c.on("close",cc=>{ if(cc===0) exeCachePrune(); cc===0?rs():rj(new Error("Compile Error:\\n"+cErr)); }); c.on("error",e=>rj(new Error("Compile spawn: "+e.message))); });
               try{fs.unlinkSync(tmpCpp);}catch{}
             }
             const binDir=path.dirname(fs.existsSync("C:\\mingw64\\bin\\g++.exe")?"C:\\mingw64\\bin\\g++.exe":"g++");
             // find actual compiler dir for DLLs
             let cdir="C:\\mingw64\\bin"; try{ if(!fs.existsSync(exe)) throw 0; }catch{}
             const runEnv={...process.env, PATH: cdir+path.delimiter+process.env.PATH};
-            const tracked=await runExeTracked(exe,[String(index)],runEnv,3000,"Time Limit Exceeded");
+            const tracked=await runExeTracked(exe,[String(absIndex)],runEnv,3000,"Time Limit Exceeded");
             try{ actual=JSON.parse(tracked.out.trim().split("\n")[0]); }catch{ throw new Error("Invalid output: "+tracked.out); }
             memKb=tracked.memKb;
           } else throw new Error("bad lang");
@@ -1819,7 +1864,12 @@ const server = http.createServer(async (req, res) => {
           lintCacheSet(key, diagnostics);
           return sendJson(res, { diagnostics }, 200);
         } finally {
-          if (isCpp) lintInflightCpp = Math.max(0, lintInflightCpp - 1);
+          if (isCpp) {
+            lintInflightCpp = Math.max(0, lintInflightCpp - 1);
+            lastLintEnd = Date.now();
+            // Idle typing lull => good moment to build the PCH in the background.
+            try { maybeBuildPch(); } catch {}
+          }
         }
       } catch (e) {
         return sendJson(res, { error: e.message }, 500);
