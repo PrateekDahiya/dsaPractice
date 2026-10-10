@@ -647,6 +647,16 @@ if(formatBtn) formatBtn.addEventListener("click", () => {
 });
 
 function fmtMem(kb){ if(kb==null) return ""; return kb>=1024?` · ~${(kb/1024).toFixed(1)} MB`:` · ~${kb} KB`; }
+// Compact one-line JSON for short values (readable at a glance), pretty only
+// when long. Stops nested arrays like 4Sum expected-outputs exploding vertically.
+function fmtJson(v){
+  try {
+    const compact = JSON.stringify(v);
+    if (compact === undefined) return "undefined";
+    if (compact.length <= 160) return compact;
+    return JSON.stringify(v, null, 2);
+  } catch { try { return String(v); } catch { return "?"; } }
+}
 function runStatsHtml(results){
   if(!results || !results.length) return "";
   const times=results.map(r=>r.timeMs||0);
@@ -928,7 +938,7 @@ function showSubmissionView(e){
   if(resultsEl2){
     const cx=(e.complexityTime||e.complexitySpace)?`<div class="run-stats" style="font-size:12px;color:var(--muted);margin:-4px 0 10px">Complexity (AI): ${esc(e.complexityTime||"?")} time · ${esc(e.complexitySpace||"?")} space</div>`:"";
     resultsEl2.innerHTML = `<div class="results-header"><div class="results-title">Results ${e.passed}/${e.total}</div></div>` + runStatsHtml(e.results||[]) + cx +
-      (e.results ? e.results.map((r,i)=>`<div class="test-case open"><div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error || JSON.stringify(r.actual))}</pre></span></div></div></div>`).join("") : "no results");
+      (e.results ? e.results.map((r,i)=>`<div class="test-case open"><div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(fmtJson(r.input))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(fmtJson(r.expected))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error || fmtJson(r.actual))}</pre></span></div></div></div>`).join("") : "no results");
   }
   const restoreBtn = document.getElementById("submission-restore-btn");
   if(restoreBtn){
@@ -1059,7 +1069,7 @@ async function execute(mode) {
     const appendCase = (r, idx) => {
       const div = document.createElement("div");
       div.className = "test-case open";
-      div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}${fmtMem(r.memKb)}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected,null,2))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:JSON.stringify(r.actual,null,2))}</pre></span></div></div>`;
+      div.innerHTML = `<div class="test-case-header"><span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${idx+1} ${r.hidden?'(hidden)':''} — ${r.passed?'Passed':'Failed'}</span><span class="test-vis">${r.hidden?'hidden':'visible'}${r.timeMs?` · ${r.timeMs}ms`:''}${fmtMem(r.memKb)}</span></div><div class="test-body" style="display:block"><div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(fmtJson(r.input))}</pre></span></div><div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(fmtJson(r.expected))}</pre></span></div><div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error?r.error:fmtJson(r.actual))}</pre></span></div></div>`;
       if(streamContainer) streamContainer.appendChild(div);
       const hdr = resultsEl.querySelector(".results-summary");
       if(hdr) hdr.textContent = `${results.filter(x=>x.passed).length} / ${total} passed`;
