@@ -1126,14 +1126,23 @@ const server = http.createServer(async (req, res) => {
     else filter = filterParam;
     const rawLimit = parseInt(url.searchParams.get("limit") || "50", 10);
     const limit = Math.min(Math.max(isNaN(rawLimit) ? 50 : rawLimit, 1), 100);
-    const cacheKey = `${filter}:${limit}`;
+    // streak=1 attaches each row's current streak (one batched query) so the
+    // page doesn't fire N per-user stats calls (each = ~8 queries).
+    const withStreak = url.searchParams.get("streak") === "1";
+    const cacheKey = `${filter}:${limit}:st${withStreak ? 1 : 0}`;
     const now = Date.now();
     const cached = cache.leaderboard.get(cacheKey);
-    if (cached && now - cached.ts < 30000) return sendJson(res, cached.data, 200);
+    if (cached && now - cached.ts < 300000) return sendJson(res, cached.data, 200);
     await ensureDb();
     if (!dbReady || !db.getLeaderboard) return sendJson(res, [], 200);
     try {
       const rows = await db.getLeaderboard(filter, limit);
+      if (withStreak && db.getStreaks) {
+        try {
+          const st = await db.getStreaks(rows.map((r) => r.id));
+          rows.forEach((r) => { r.streak = st[r.id] != null ? st[r.id] : 0; });
+        } catch { rows.forEach((r) => { r.streak = "-"; }); }
+      }
       cache.leaderboard.set(cacheKey, { data: rows, ts: now });
       return sendJson(res, rows, 200);
     } catch (e) {

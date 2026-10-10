@@ -102,6 +102,8 @@ async function initDb() {
 
   // indexes for dashboard speed (composite covering)
   try { await pool.query(`CREATE INDEX idx_sub_user_passed_mode_created ON submissions (userId, passed, mode, createdAt)`); } catch {}
+  // covering index for the leaderboard single-pass query (mode filter + per-user aggregates)
+  try { await pool.query(`CREATE INDEX idx_sub_mode_user_q ON submissions (mode, userId, questionId, passed, createdAt)`); } catch {}
   try { await pool.query(`CREATE INDEX idx_sub_user_q_created ON submissions (userId, questionId, createdAt)`); } catch {}
   try { await pool.query(`CREATE INDEX idx_sub_user_passed_mode_qid ON submissions (userId, passed, mode, questionId)`); } catch {}
   try { await pool.query(`CREATE INDEX idx_questions_created ON questions (createdAt)`); } catch {}

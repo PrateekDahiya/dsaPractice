@@ -129,7 +129,6 @@ async function getStats(userId) {
     const countMap = {};
     for (const r of perDay) countMap[r.date] = r.count;
     const distinctDates = perDay.map(r => r.date).sort();
-    const dateSet = new Set(distinctDates);
     let longest = 0, curRun = 0, prev = null;
     for (const ds of distinctDates) {
       if (prev) { const diff = (new Date(ds) - new Date(prev)) / 86400000; curRun = diff === 1 ? curRun + 1 : 1; } else curRun = 1;
@@ -137,12 +136,7 @@ async function getStats(userId) {
       prev = ds;
     }
     if (distinctDates.length === 0) longest = 0;
-    let current = 0;
-    if (dateSet.has(todayStr)) {
-      current = 1;
-      let cursor = new Date(todayStr);
-      while (true) { cursor.setUTCDate(cursor.getUTCDate() - 1); const cs = cursor.toISOString().slice(0,10); if (dateSet.has(cs)) current += 1; else break; }
-    }
+    const current = currentStreakFromDates(distinctDates, todayStr);
     const totalActive = distinctDates.length;
     const calendar = [];
     const baseToday = new Date(todayStr); baseToday.setUTCHours(0,0,0,0);
@@ -152,6 +146,66 @@ async function getStats(userId) {
     return result;
   } catch (e) {
     return { solved: 0, total, byDifficulty: { Easy: { solved: 0, total: totalByDiff.Easy||0 }, Medium: { solved: 0, total: totalByDiff.Medium||0 }, Hard: { solved: 0, total: totalByDiff.Hard||0 } }, recent: [], perDay: [], streaks: { current: 0, longest: 0, totalActive: 0, calendar: buildEmptyCalendar(365) } };
+  }
+}
+function todayKolkata() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+// Current-day streak from sorted unique YYYY-MM-DD solve dates (same semantics
+// as the dashboard: counts back from today while consecutive).
+function currentStreakFromDates(sortedUnique, todayStr) {
+  const dateSet = new Set(sortedUnique);
+  let current = 0;
+  if (dateSet.has(todayStr)) {
+    current = 1;
+    const cursor = new Date(todayStr);
+    while (true) { cursor.setUTCDate(cursor.getUTCDate() - 1); const cs = cursor.toISOString().slice(0, 10); if (dateSet.has(cs)) current += 1; else break; }
+  }
+  return current;
+}
+// One batched lookup for many users: current streak each.
+// IMPORTANT: day-binning must match getStats exactly — it bins auto solves via
+// SQL CONVERT_TZ but manual solves via JS toLocaleDateString (Asia/Kolkata),
+// and on this DB those two paths can disagree by a day at boundaries. So we
+// replicate both paths here (auto in SQL, manual in JS) and merge day sets.
+async function getStreaks(userIds) {
+  const ids = [...new Set((userIds || []).filter((n) => Number.isInteger(n)))].slice(0, 100);
+  const out = {};
+  ids.forEach((id) => { out[id] = 0; });
+  if (!ids.length) return out;
+  const daySets = {};
+  const addDay = (uid, d) => {
+    if (uid == null || !d) return;
+    (daySets[uid] = daySets[uid] || new Set()).add(d);
+  };
+  try {
+    const ph = ids.map(() => '?').join(',');
+    const [autoRows] = await getPool().query(
+      `SELECT userId, DATE_FORMAT(DATE(CONVERT_TZ(createdAt,'+00:00','+05:30')), '%Y-%m-%d') AS d
+       FROM submissions WHERE userId IN (${ph}) AND passed=total AND mode='submit'
+       GROUP BY userId, d`,
+      ids);
+    for (const r of (autoRows || [])) addDay(r.userId, r.d);
+    try {
+      const [manRows] = await getPool().query(
+        `SELECT userId, createdAt FROM manual_solved WHERE userId IN (${ph})`, ids);
+      for (const r of (manRows || [])) {
+        try {
+          addDay(r.userId, new Date(r.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+        } catch {}
+      }
+    } catch (e) {
+      // manual_solved table may not exist yet — auto solves only
+      if (!String((e && e.message) || '').includes("doesn't exist") && String(e && e.code) !== '1146') throw e;
+    }
+    const today = todayKolkata();
+    for (const id of ids) {
+      const dates = daySets[id] ? [...daySets[id]].sort() : [];
+      out[id] = currentStreakFromDates(dates, today);
+    }
+    return out;
+  } catch {
+    return out;
   }
 }
 async function getLeaderboard(filter = 'all', limit = 50) {
@@ -164,27 +218,40 @@ async function getLeaderboard(filter = 'all', limit = 50) {
     else f = 'all';
   }
   try {
-    let dateClause = '';
-    if (f === 'weekly') dateClause = ` AND combined.createdAt >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
-    else if (f === 'monthly') dateClause = ` AND combined.createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)`;
-    // Union auto submissions + manual overrides so leaderboard counts Mark as Done
-    const sql = `SELECT u.id, u.username, u.avatar, COUNT(DISTINCT combined.questionId) as solvedCount, MAX(combined.createdAt) as lastSolvedAt
+    const days = f === 'weekly' ? 7 : f === 'monthly' ? 30 : 0;
+    // Single pass: aggregate per user INSIDE the derived table (indexed scan),
+    // then left-join users so zero-solve users still appear. UNION (distinct)
+    // dedupes questions solved both via submit and manual mark-as-done.
+    const sql = `SELECT u.id, u.username, u.avatar,
+        COALESCE(t.solvedCount, 0) AS solvedCount, t.lastSolvedAt AS lastSolvedAt
       FROM users u
       LEFT JOIN (
-        SELECT userId, questionId, createdAt FROM submissions WHERE passed=total AND mode='submit'
-        UNION
-        SELECT userId, questionId, createdAt FROM manual_solved
-      ) combined ON combined.userId = u.id${dateClause}
-      GROUP BY u.id, u.username, u.avatar ORDER BY solvedCount DESC, lastSolvedAt ASC LIMIT ?`;
+        SELECT userId, COUNT(DISTINCT questionId) AS solvedCount, MAX(createdAt) AS lastSolvedAt
+        FROM (
+          SELECT userId, questionId, createdAt FROM submissions WHERE passed=total AND mode='submit'
+          UNION
+          SELECT userId, questionId, createdAt FROM manual_solved
+        ) combined
+        ${days ? `WHERE createdAt >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : ''}
+        GROUP BY userId
+      ) t ON t.userId = u.id
+      ORDER BY solvedCount DESC, lastSolvedAt ASC LIMIT ?`;
     const [rows] = await getPool().query(sql, [lim]);
     return rows.map(r => ({ id: r.id, username: r.username, avatar: r.avatar || null, solvedCount: Number(r.solvedCount) || 0, lastSolvedAt: r.lastSolvedAt ? new Date(r.lastSolvedAt).toISOString() : null }));
   } catch (e) {
     // fallback to submissions-only if manual_solved missing
     try {
-      let dateClause = '';
-      if (f === 'weekly') dateClause = ` AND s.createdAt >= DATE_SUB(NOW(), INTERVAL 7 DAY)`;
-      else if (f === 'monthly') dateClause = ` AND s.createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)`;
-      const sql = `SELECT u.id, u.username, u.avatar, COUNT(DISTINCT s.questionId) as solvedCount, MAX(s.createdAt) as lastSolvedAt FROM users u LEFT JOIN submissions s ON s.userId = u.id AND s.passed = s.total AND s.mode='submit'${dateClause} GROUP BY u.id, u.username, u.avatar ORDER BY solvedCount DESC, lastSolvedAt ASC LIMIT ?`;
+      const days = f === 'weekly' ? 7 : f === 'monthly' ? 30 : 0;
+      const sql = `SELECT u.id, u.username, u.avatar,
+          COALESCE(t.solvedCount, 0) AS solvedCount, t.lastSolvedAt AS lastSolvedAt
+        FROM users u
+        LEFT JOIN (
+          SELECT userId, COUNT(DISTINCT questionId) AS solvedCount, MAX(createdAt) AS lastSolvedAt
+          FROM submissions WHERE passed=total AND mode='submit'
+          ${days ? `AND createdAt >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : ''}
+          GROUP BY userId
+        ) t ON t.userId = u.id
+        ORDER BY solvedCount DESC, lastSolvedAt ASC LIMIT ?`;
       const [rows] = await getPool().query(sql, [lim]);
       return rows.map(r => ({ id: r.id, username: r.username, avatar: r.avatar || null, solvedCount: Number(r.solvedCount) || 0, lastSolvedAt: r.lastSolvedAt ? new Date(r.lastSolvedAt).toISOString() : null }));
     } catch { return []; }
@@ -290,4 +357,4 @@ async function getQuestionPerf(questionId, userId) {
   };
 }
 
-module.exports = { toISODate, buildEmptyCalendar, getSolvedIds, getStats, getLeaderboard, getUserDashboard, getQuestionStats, getQuestionPerf, clearStatsCache };
+module.exports = { toISODate, buildEmptyCalendar, getSolvedIds, getStats, getLeaderboard, getStreaks, getUserDashboard, getQuestionStats, getQuestionPerf, clearStatsCache };

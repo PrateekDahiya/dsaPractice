@@ -80,24 +80,11 @@
     let currentFilter="all";
     async function fetchLeaderboard(filter){
       const headers=authHeaders({});
-      const res=await fetch(`/api/leaderboard?filter=${encodeURIComponent(filter)}&limit=50`, { headers });
+      // streak=1: server attaches each row's current streak in the same
+      // roundtrip (one batched query) — no per-user stats fan-out.
+      const res=await fetch(`/api/leaderboard?filter=${encodeURIComponent(filter)}&limit=50&streak=1`, { headers });
       if(!res.ok){ const d=await res.json().catch(()=>({})); throw new Error(d.error||"Failed to load leaderboard"); }
       return await res.json();
-    }
-    // optional: fetch streak per user if needed (best effort, parallel with limit)
-    async function enrichWithStreak(rows){
-      // fetch stats for each user to get current streak — do limited concurrency
-      const t=getToken();
-      // only enrich top 10 to avoid flood
-      const top = rows.slice(0,10);
-      const map={};
-      await Promise.all(top.map(async u=>{
-        try{
-          const r=await fetch(`/api/users/${u.id}/stats`, { headers: authHeaders({}) });
-          if(r.ok){ const s=await r.json(); map[u.id]=s.streaks?.current ?? "-"; }
-        }catch{}
-      }));
-      return rows.map(r=>({ ...r, streak: map[r.id] ?? "-" }));
     }
     function formatLast(d){
       if(!d) return "-";
@@ -117,8 +104,7 @@
       loading.innerHTML=`<div class="loading">Loading leaderboard...</div>`; loading.classList.remove("hidden"); table.classList.add("hidden"); empty.classList.add("hidden");
       showLoader();
       try{
-        let rows=await fetchLeaderboard(filter);
-        rows=await enrichWithStreak(rows);
+        const rows=await fetchLeaderboard(filter);
         hideLoader();
         loading.classList.add("hidden");
         if(!rows.length){ empty.classList.remove("hidden"); return; }
