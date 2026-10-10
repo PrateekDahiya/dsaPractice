@@ -18,7 +18,20 @@ function resolveCompiler(ROOT) {
 }
 
 function getPchPath() {
-  return path.join(os.tmpdir(), 'dsa_pch', 'bits', 'stdc++.h.gch');
+  return path.join(os.tmpdir(), 'dsa_pch_v2', 'bits', 'stdc++.h.gch');
+}
+
+function pchDir() {
+  return path.join(os.tmpdir(), 'dsa_pch_v2');
+}
+
+// Returns ['-I', <pchDir>] when a usable PCH exists and PCH is enabled,
+// else null. (-I is the GCC mechanism: #include <bits/stdc++.h> then finds
+// the .gch first. -include-pch is Clang-only and fatals under GCC.)
+function pchArgsUsable() {
+  if (process.env.ENABLE_PCH !== '1') return null;
+  try { if (!fs.existsSync(getPchPath())) return null; } catch { return null; }
+  return ['-I', pchDir()];
 }
 
 function isPchAvailable() {
@@ -26,7 +39,7 @@ function isPchAvailable() {
 }
 
 // Generate bits precompiled header once (called non-blocking at server startup).
-// Output: <os.tmpdir()>/dsa_pch/bits/stdc++.h.gch via
+// Output: <os.tmpdir()>/dsa_pch_v2/bits/stdc++.h.gch via
 //   g++ -std=c++17 -x c++-header <bits/stdc++.h> -o <gch>
 // bits path resolved via `g++ -print-file-name=bits/stdc++.h` with fallback
 // to a temp header containing `#include <bits/stdc++.h>`. Failures swallowed (null).
@@ -53,9 +66,11 @@ async function ensureBitsPch(ROOT) {
     } catch { bitsPath = null; }
     if (bitsPath) {
       try {
-        const r2 = await runCmd(compiler, ['-std=c++17', '-x', 'c++-header', bitsPath, '-o', gchPath], 120000);
+        // NOTE: -O0 matches the flags used at compile time (GCC requires the
+        // PCH to be built with compatible options to be picked up).
+        const r2 = await runCmd(compiler, ['-std=c++17', '-O0', '-x', 'c++-header', bitsPath, '-o', gchPath], 120000);
         if (r2 && r2.code === 0) {
-          try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
+          try { if (fs.existsSync(gchPath)) return verifyFreshPch(compiler, gchPath); } catch {}
         }
       } catch {}
       // fall through to fallback header on failure
@@ -64,9 +79,9 @@ async function ensureBitsPch(ROOT) {
     const tmpH = path.join(os.tmpdir(), `dsa_pch_fallback_${Date.now()}.h`);
     try {
       fs.writeFileSync(tmpH, '#include <bits/stdc++.h>\n', 'utf8');
-      const r3 = await runCmd(compiler, ['-std=c++17', '-x', 'c++-header', tmpH, '-o', gchPath], 120000);
+      const r3 = await runCmd(compiler, ['-std=c++17', '-O0', '-x', 'c++-header', tmpH, '-o', gchPath], 120000);
       if (r3 && r3.code === 0) {
-        try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
+        try { if (fs.existsSync(gchPath)) return verifyFreshPch(compiler, gchPath); } catch {}
       }
     } catch {} finally {
       try { fs.unlinkSync(tmpH); } catch {}
@@ -74,6 +89,32 @@ async function ensureBitsPch(ROOT) {
     try { if (fs.existsSync(gchPath)) return gchPath; } catch {}
     return null;
   } catch {
+    return null;
+  }
+}
+
+// Sanity-check a freshly built GCH with a trivial TU using the same flags as
+// real compiles. On failure the GCH is deleted: a poisoned .gch sitting in the
+// -I path would otherwise break every future compile that auto-picks it.
+// Returns the path on success, null on failure.
+async function verifyFreshPch(compiler, gchPath) {
+  const t0 = Date.now();
+  try {
+    if (!fs.existsSync(gchPath)) return null;
+    const dir = path.dirname(path.dirname(gchPath));
+    const tmp = path.join(os.tmpdir(), `dsa_pchtest_${Date.now()}.cpp`);
+    fs.writeFileSync(tmp, '#include <bits/stdc++.h>\nint main(){std::vector<int> v;return (int)v.size();}\n', 'utf8');
+    const r = await runCmd(compiler, ['-std=c++17', '-O0', '-I', dir, '-fsyntax-only', tmp], 60000);
+    try { fs.unlinkSync(tmp); } catch {}
+    if (!r || r.code !== 0) {
+      try { fs.unlinkSync(gchPath); } catch {}
+      console.warn('PCH self-test failed, .gch discarded:', String((r && (r.err || r.out)) || 'no output').split('\n')[0].slice(0, 200));
+      return null;
+    }
+    console.log(`PCH self-test passed in ${Date.now() - t0}ms`);
+    return gchPath;
+  } catch (e) {
+    try { fs.unlinkSync(gchPath); } catch {}
     return null;
   }
 }
@@ -166,12 +207,11 @@ async function lintCpp(code, ROOT) {
     // Use precompiled bits header when available (faster, far less RAM).
     // If the compile errors mention pch, retry once without the flag (identical to old behavior).
     let r;
-    let pchAvailable = false;
-    try { pchAvailable = fs.existsSync(getPchPath()); } catch { pchAvailable = false; }
-    if (pchAvailable) {
-      r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', '-include-pch', getPchPath(), tmpFile], 8000);
+    const pchArgs = pchArgsUsable();
+    if (pchArgs) {
+      r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', ...pchArgs, tmpFile], 15000);
       const combined = String((r && r.err) || '') + '\n' + String((r && r.out) || '');
-      if (r.code !== 0 && /pch|precompiled|unrecognized.*include/i.test(combined)) {
+      if (r.code !== 0 && /pch|precompiled|\.gch|different GCC|mismatch|unrecognized.*include/i.test(combined)) {
         r = await runCmd(compiler, ['-std=c++17', '-fsyntax-only', tmpFile], 8000);
       }
     } else {
