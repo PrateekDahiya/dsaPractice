@@ -804,32 +804,30 @@ function resetResultTab() {
   if (btn) btn.classList.add("hidden");
   if (document.querySelector('.ptab[data-ptab="result"]')?.classList.contains("active")) switchPtab("desc");
 }
-// LeetCode-style submit verdict in the LEFT panel: verdict + counts, runtime /
-// memory cards on accept, failed-case browser + submitted code.
-function showSubmitResult(payload) {
-  const view = document.getElementById("result-view");
-  if (!view || !currentQuestion) return;
-  const v = verdictOf(payload);
-  const { results, total, passed } = payload;
-  const failedIdx = results.findIndex(r => !r.passed);
-  window.__resultSel = failedIdx >= 0 ? failedIdx : 0;
-  const avg = runtimeAvg(results);
-  const mem = maxMemKb(results);
-  const code = (getCode() || "").slice(0, 8000);
-  const langLabel = { cpp: "C++", javascript: "JavaScript", python: "Python" }[currentLang] || currentLang;
-  const failed = results.filter(r => !r.passed).length;
-  view.innerHTML = `
+// Shared LeetCode-style verdict markup for the LEFT Result tab.
+// o: { verdict, passed, total, failed, sub (pre-escaped html), stats:{avg,mem}|null,
+//      results, sel, code, langLabel, complexityHtml (static) | null (live placeholder),
+//      errText }
+function resultViewInner(o) {
+  const v = o.verdict;
+  return `
     <div class="lc-verdict-row"><span class="${v.cls}">${v.label}</span></div>
-    <div class="lc-count">${passed} / ${total} testcases passed${failed ? ` · ${failed} failed` : ""}</div>
-    <div class="lc-sub">submitted just now · ${esc(currentLang)}</div>
-    ${v.allPass ? `<div class="lc-cards">
-      <div class="lc-card lc-stat"><div class="lc-card-label">⏱ Runtime</div><div class="lc-card-val">${avg} ms</div></div>
-      <div class="lc-card lc-stat"><div class="lc-card-label">🧠 Memory</div><div class="lc-card-val">${esc(fmtMemShort(mem))}</div></div>
+    <div class="lc-count">${o.passed} / ${o.total} testcases passed${o.failed ? ` · ${o.failed} failed` : ""}</div>
+    <div class="lc-sub">${o.sub}</div>
+    ${o.stats ? `<div class="lc-cards">
+      <div class="lc-card lc-stat"><div class="lc-card-label">⏱ Runtime</div><div class="lc-card-val">${o.stats.avg} ms</div></div>
+      <div class="lc-card lc-stat"><div class="lc-card-label">🧠 Memory</div><div class="lc-card-val">${esc(fmtMemShort(o.stats.mem))}</div></div>
     </div>` : ""}
-    ${v.allError ? `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(results[0].error || "Unknown error")}</pre></div>` : `<div id="complexity-line-left" class="lc-complexity"></div><div class="case-pills">${casePillsHtml(results, window.__resultSel)}</div><div id="result-detail">${lcDetailHtml(results[window.__resultSel])}</div>`}
-    <div class="lc-code-head">Code <span style="color:var(--muted)">|</span> ${esc(langLabel)}</div>
-    <pre class="lc-code">${esc(code)}</pre>
+    ${v.allError
+      ? `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(o.errText || "Unknown error")}</pre></div>`
+      : `${o.complexityHtml != null ? `<div class="lc-complexity">${o.complexityHtml}</div>` : `<div id="complexity-line-left" class="lc-complexity"></div>`}
+         <div class="case-pills">${casePillsHtml(o.results, o.sel)}</div>
+         <div id="result-detail">${lcDetailHtml(o.results[o.sel])}</div>`}
+    <div class="lc-code-head">Code <span style="color:var(--muted)">|</span> ${esc(o.langLabel)}</div>
+    <pre class="lc-code">${esc(o.code)}</pre>
   `;
+}
+function wireResultPills(view, results) {
   view.querySelectorAll(".case-pill").forEach(btn => {
     btn.addEventListener("click", () => {
       window.__resultSel = parseInt(btn.dataset.idx, 10) || 0;
@@ -838,9 +836,65 @@ function showSubmitResult(payload) {
       if (d) d.innerHTML = lcDetailHtml(results[window.__resultSel]);
     });
   });
+}
+function revealResultTab() {
   const tabBtn = document.querySelector('.ptab[data-ptab="result"]');
   if (tabBtn) tabBtn.classList.remove("hidden");
   switchPtab("result");
+}
+// LeetCode-style submit verdict in the LEFT panel: verdict + counts, runtime /
+// memory cards on accept, failed-case browser + submitted code.
+function showSubmitResult(payload) {
+  const view = document.getElementById("result-view");
+  if (!view || !currentQuestion) return;
+  const v = verdictOf(payload);
+  const { results, total, passed } = payload;
+  const failedIdx = results.findIndex(r => !r.passed);
+  const sel = failedIdx >= 0 ? failedIdx : 0;
+  window.__resultSel = sel;
+  const langLabel = { cpp: "C++", javascript: "JavaScript", python: "Python" }[currentLang] || currentLang;
+  const code = (getCode() || "").slice(0, 8000);
+  view.innerHTML = resultViewInner({
+    verdict: v, passed, total,
+    failed: results.filter(r => !r.passed).length,
+    sub: `submitted just now · ${esc(currentLang)}`,
+    stats: v.allPass ? { avg: runtimeAvg(results), mem: maxMemKb(results) } : null,
+    results, sel, code, langLabel, complexityHtml: null,
+    errText: results[0] && results[0].error,
+  });
+  wireResultPills(view, results);
+  revealResultTab();
+}
+// Same verdict view for a STORED submission opened from the Submissions tab:
+// verdict + counts (+ static AI complexity when recorded) + code.
+function showSubmissionInResult(e) {
+  const view = document.getElementById("result-view");
+  if (!view || !e) return;
+  const results = Array.isArray(e.results) ? e.results : [];
+  const total = e.total != null ? e.total : results.length;
+  const passed = e.passed != null ? e.passed : results.filter(r => r.passed).length;
+  const v = verdictOf({ results, total, passed });
+  const failedIdx = results.findIndex(r => !r.passed);
+  const sel = failedIdx >= 0 ? failedIdx : 0;
+  window.__resultSel = sel;
+  const lang = e.language || "javascript";
+  const langLabel = { cpp: "C++", javascript: "JavaScript", python: "Python" }[lang] || lang;
+  const dt = e.ts ? new Date(e.ts).toLocaleString() : (e.createdAt ? new Date(e.createdAt).toLocaleString() : "");
+  const cx = (e.complexityTime || e.complexitySpace)
+    ? `Complexity (AI): <strong>${esc(e.complexityTime || "?")} time · ${esc(e.complexitySpace || "?")} space</strong>`
+    : null;
+  const readOnly = window.__DASHBOARD_READONLY === true;
+  const code = readOnly ? "Read-only view — code hidden for other user" : String(e.code || "").slice(0, 8000);
+  view.innerHTML = resultViewInner({
+    verdict: v, passed, total,
+    failed: results.filter(r => !r.passed).length,
+    sub: `${esc(e.mode || "submit")} · ${esc(lang)}${dt ? ` · ${esc(dt)}` : ""}`,
+    stats: v.allPass ? { avg: runtimeAvg(results), mem: maxMemKb(results) } : null,
+    results, sel, code, langLabel, complexityHtml: cx,
+    errText: results[0] && results[0].error,
+  });
+  wireResultPills(view, results);
+  revealResultTab();
 }
 function renderResults(payload) {
   if(!resultsEl) return;
@@ -1053,6 +1107,9 @@ function showSubmissionView(e){
       // stay on submissions tab, but show editor — user can switch to Description to continue editing
     };
   }
+  // Mirror the verdict into the LEFT Result tab (LeetCode-style), so opening a
+  // submission from history shows Accepted/Wrong Answer + cases + code there.
+  try { showSubmissionInResult(e); } catch (err) { console.warn("result tab mirror failed", err); }
 }
 function restoreSubmissionToEditor(e){
   if(!e) return;
