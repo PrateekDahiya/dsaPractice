@@ -32,6 +32,7 @@ try { db = require("./db"); } catch { db = null; }
 let dbReady = false;
 let useDb = !!db;
 let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
+let dailyCache = { date: "", payload: null }; // daily challenge (UTC date -> pick)
 // ---------- lint guards: single-flight + cache + rate limit (OOM fix for /api/lint) ----------
 const lintStats = { total: 0, cacheHits: 0, rateLimited: 0, execRejected: 0 };
 let lintInflightCpp = 0; // max 1 concurrent g++ lint process
@@ -1235,7 +1236,28 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
   }
 
-  // ---------- Stats / Streaks / Leaderboard APIs ----------
+  // ---------- Daily challenge (deterministic UTC rotation, Medium/Hard) ----------
+  // No cron needed (Render free sleeps): derived on demand from the date, so
+  // every instance and user sees the same question all day, globally.
+  if (pathname === "/api/daily" && req.method === "GET") {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      if (dailyCache.date !== today || !dailyCache.payload) {
+        const qs = await loadQuestions();
+        const eligible = (arr) => (arr || []).filter((q) => q && q.visibleTestCases && q.visibleTestCases.length);
+        let pool = eligible((qs || []).filter((q) => q.difficulty === "Medium" || q.difficulty === "Hard"));
+        if (!pool.length) pool = eligible(qs);
+        if (!pool.length) return sendJson(res, { error: "No questions available" }, 404);
+        const h = crypto.createHash("sha256").update("daily:" + today).digest();
+        const pick = pool[h.readUInt32BE(0) % pool.length];
+        dailyCache = {
+          date: today,
+          payload: { date: today, questionId: pick.id, title: pick.title, difficulty: pick.difficulty, tags: pick.tags || [] },
+        };
+      }
+      return sendJson(res, dailyCache.payload, 200);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
   if (pathname === "/api/questions/solved" && req.method === "GET") {
     tryAuthenticate(req);
     const userId = req.user ? req.user.id : null;

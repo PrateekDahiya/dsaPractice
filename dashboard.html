@@ -133,9 +133,13 @@
         targetId=null; // me
       }
       // if other user but not logged in, still allow viewing if server permits anon? Our /api/users/:id/dashboard requires DB but not necessarily auth for numeric id, but we try with auth if present
-      let data, questions;
+      let data, questions, daily=null;
       try{
         [data, questions] = await Promise.all([fetchDashboard(targetId), fetchQuestionsSummaries()]);
+        try{
+          const rd=await fetch("/api/daily");
+          if(rd.ok) daily=await rd.json();
+        }catch{}
         hideLoader();
       }catch(e){
         hideLoader();
@@ -214,6 +218,14 @@
           <h1 style="font-size:22px">${isOther? `Dashboard — ${userLabel}` : `Dashboard`}${isOther? ' <span style="color:var(--muted);font-size:13px;font-weight:400">(read-only)</span>':''}</h1>
           <span style="color:var(--muted);font-size:13px">${stats.solved} solved · ${stats.total} total</span>
         </div>
+        ${daily?`<div class="list-card" style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-color:var(--accent)">
+          <span style="font-size:20px">📅</span>
+          <div style="flex:1;min-width:200px">
+            <div style="font-size:12px;color:var(--muted)">Daily challenge · ${esc(daily.date)} (UTC)${solvedIds.has(daily.questionId)?' · <span style="color:var(--green);font-weight:700">solved ✓</span>':""}</div>
+            <div style="font-size:15px;font-weight:800;margin-top:2px"><a href="index.html#${esc(daily.questionId)}" class="q-link">${esc(daily.title)}</a> <span class="badge ${esc(daily.difficulty)}">${esc(daily.difficulty)}</span></div>
+          </div>
+          <a href="index.html#${esc(daily.questionId)}" class="btn primary" style="padding:6px 14px;text-decoration:none">Solve →</a>
+        </div>`:""}
         ${profileCard}
         <div class="dash-grid">
           <div class="ring-card">
