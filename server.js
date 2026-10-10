@@ -112,14 +112,21 @@ function exeCacheDir() {
 // the cpp gate slot so it can never run concurrently with a user compile (OOM-safe).
 // Every compile site appends pchCompileArgs(); when no .gch exists it is just [].
 function pchPath() {
-  return path.join(os.tmpdir(), "dsa_pch", "bits", "stdc++.h.gch");
+  return path.join(os.tmpdir(), "dsa_pch_v2", "bits", "stdc++.h.gch");
+}
+function pchDir() {
+  return path.join(os.tmpdir(), "dsa_pch_v2");
 }
 function pchExists() {
   try { return fs.existsSync(pchPath()); } catch { return false; }
 }
 function pchCompileArgs() {
+  // GCC has no -include-pch (that's Clang-only and fatals with
+  // "-pch: No such file or directory"). The correct GCC mechanism is
+  // -I <dir-containing-bits/>: #include <bits/stdc++.h> then finds the
+  // .gch first and memory-maps it instead of re-parsing the STL.
   if (!ENABLE_PCH || !pchExists()) return [];
-  try { return ["-include-pch", pchPath()]; } catch { return []; }
+  try { return ["-I", pchDir()]; } catch { return []; }
 }
 let pchBuilding = false;
 function maybeBuildPch() {
@@ -1992,8 +1999,17 @@ server.listen(PORT, async () => {
     _c.on("close",(code)=>{ if(_done) return; _done=true; if(code===0) console.log("g++ available (PATH)"); else console.warn("g++ check exit "+code+" — C++ execution may fail; set DISABLE_CPP=1 for JS/Python-only mode"); });
     _c.on("error",()=>{ if(_done) return; _done=true; console.warn("g++ not found in PATH — C++ execution will fail; set DISABLE_CPP=1 for JS/Python-only mode"); });
   }catch{}
+  // Drop the legacy v1 PCH dir if present (built without matching flags; the
+  // v2 dir above supersedes it). Cheap unlink, frees ~80MB of ephemeral disk.
+  try {
+    const legacy = path.join(os.tmpdir(), "dsa_pch");
+    if (fs.existsSync(legacy)) {
+      try { fs.rmSync(legacy, { recursive: true, force: true }); console.log("removed legacy PCH dir"); }
+      catch {}
+    }
+  } catch {}
   // Precompiled bits header for lint (non-blocking, failures swallowed).
-  // Generates <os.tmpdir()>/dsa_pch/bits/stdc++.h.gch once so per-keystroke
+  // Generates <os.tmpdir()>/dsa_pch_v2/bits/stdc++.h.gch once so per-keystroke
   // g++ -fsyntax-only parses far less and uses far less RAM.
   // Disabled by default on low-memory hosts (ENABLE_PCH=1 to opt in).
   if (ENABLE_PCH) {
