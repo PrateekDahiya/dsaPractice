@@ -335,6 +335,7 @@ async function loadQuestion(id) {
     }
     currentQuestion = q;
     syncQuestionCtx();
+    resetResultTab();
     renderProblem();
     // Starter code + history are independent fetches: run in parallel instead
     // of sequentially (each is a 0.3-1s DB roundtrip on hosted deployments).
@@ -741,38 +742,134 @@ async function renderPerformance(){
     el.style.color="";
   }catch{ const el=document.getElementById("perf-problem"); if(el) el.textContent="Problem stats unavailable."; }
 }
+function verdictOf(payload) {
+  const { results, total, passed } = payload;
+  if (results && results.length && results.every(r => r.error)) {
+    const msg = results[0].error || "";
+    return { label: /compile/i.test(msg) ? "Compile Error" : "Runtime Error", cls: "verdict-error", allPass: false, allError: true };
+  }
+  if (passed === total) return { label: "Accepted", cls: "verdict-accepted", allPass: true, allError: false };
+  return { label: "Wrong Answer", cls: "verdict-wrong", allPass: false, allError: false };
+}
+function runtimeAvg(results) {
+  if (!results || !results.length) return 0;
+  return Math.round(results.reduce((a, r) => a + (r.timeMs || 0), 0) / results.length);
+}
+function maxMemKb(results) {
+  const ms = (results || []).map(r => r.memKb).filter(m => m != null);
+  return ms.length ? Math.max(...ms) : null;
+}
+function fmtMemShort(kb) {
+  if (kb == null) return "n/a";
+  return kb >= 1024 ? `${(kb / 1024).toFixed(2)} MB` : `${kb} KB`;
+}
+// LeetCode-style per-param input lines: `s = "abcabcb"`
+function lcInputHtml(input) {
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    const keys = Object.keys(input);
+    if (keys.length) return keys.map(k => `<div class="lc-param"><span class="lc-param-name">${esc(k)} =</span><pre class="lc-param-val">${esc(fmtJson(input[k]))}</pre></div>`).join("");
+  }
+  return `<pre class="lc-param-val">${esc(fmtJson(input))}</pre>`;
+}
+// Shared case detail: Input / Output / Expected cards (Output red + Expected
+// green on failure, like LeetCode).
+function lcDetailHtml(r) {
+  if (!r) return "";
+  if (r.error && r.actual == null) {
+    return `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(r.error)}</pre></div>`;
+  }
+  const failed = !r.passed;
+  return `<div class="lc-label">Input</div><div class="lc-card">${lcInputHtml(r.input)}</div>`
+    + `<div class="lc-label">Output</div><div class="lc-card"><pre class="${failed ? "lc-out-fail" : ""}">${esc(r.error ? r.error : fmtJson(r.actual))}</pre></div>`
+    + `<div class="lc-label">Expected</div><div class="lc-card"><pre class="${failed ? "lc-exp-fail" : ""}">${esc(fmtJson(r.expected))}</pre></div>`;
+}
+function casePillsHtml(results, sel, cls) {
+  return (results || []).map((r, i) => {
+    const icon = r.passed ? "✓" : "✕";
+    return `<button class="${cls || "case-pill"} ${r.passed ? "pass" : "fail"} ${i === sel ? "active" : ""}" data-idx="${i}" title="Case ${i + 1}${r.hidden ? " (hidden)" : ""} — ${r.passed ? "Passed" : "Failed"}"><span class="pill-icon">${icon}</span> Case ${i + 1}</button>`;
+  }).join("");
+}
+function switchPtab(name) {
+  document.querySelectorAll(".ptab").forEach(b => b.classList.toggle("active", b.dataset.ptab === name));
+  document.querySelectorAll(".ptab-panel").forEach(p => p.classList.toggle("active", p.id === "ptab-" + name));
+  if (name === "desc") showEditMode();
+  else if (name === "perf") renderPerformance();
+}
+function resetResultTab() {
+  const btn = document.querySelector('.ptab[data-ptab="result"]');
+  if (btn) btn.classList.add("hidden");
+  if (document.querySelector('.ptab[data-ptab="result"]')?.classList.contains("active")) switchPtab("desc");
+}
+// LeetCode-style submit verdict in the LEFT panel: verdict + counts, runtime /
+// memory cards on accept, failed-case browser + submitted code.
+function showSubmitResult(payload) {
+  const view = document.getElementById("result-view");
+  if (!view || !currentQuestion) return;
+  const v = verdictOf(payload);
+  const { results, total, passed } = payload;
+  const failedIdx = results.findIndex(r => !r.passed);
+  window.__resultSel = failedIdx >= 0 ? failedIdx : 0;
+  const avg = runtimeAvg(results);
+  const mem = maxMemKb(results);
+  const code = (getCode() || "").slice(0, 8000);
+  const langLabel = { cpp: "C++", javascript: "JavaScript", python: "Python" }[currentLang] || currentLang;
+  const failed = results.filter(r => !r.passed).length;
+  view.innerHTML = `
+    <div class="lc-verdict-row"><span class="${v.cls}">${v.label}</span></div>
+    <div class="lc-count">${passed} / ${total} testcases passed${failed ? ` · ${failed} failed` : ""}</div>
+    <div class="lc-sub">submitted just now · ${esc(currentLang)}</div>
+    ${v.allPass ? `<div class="lc-cards">
+      <div class="lc-card lc-stat"><div class="lc-card-label">⏱ Runtime</div><div class="lc-card-val">${avg} ms</div></div>
+      <div class="lc-card lc-stat"><div class="lc-card-label">🧠 Memory</div><div class="lc-card-val">${esc(fmtMemShort(mem))}</div></div>
+    </div>` : ""}
+    ${v.allError ? `<div class="lc-label">Error</div><div class="lc-card lc-error-card"><pre>${esc(results[0].error || "Unknown error")}</pre></div>` : `<div class="case-pills">${casePillsHtml(results, window.__resultSel)}</div><div id="result-detail">${lcDetailHtml(results[window.__resultSel])}</div>`}
+    <div class="lc-code-head">Code <span style="color:var(--muted)">|</span> ${esc(langLabel)}</div>
+    <pre class="lc-code">${esc(code)}</pre>
+  `;
+  view.querySelectorAll(".case-pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      window.__resultSel = parseInt(btn.dataset.idx, 10) || 0;
+      view.querySelectorAll(".case-pill").forEach(b => b.classList.toggle("active", b === btn));
+      const d = document.getElementById("result-detail");
+      if (d) d.innerHTML = lcDetailHtml(results[window.__resultSel]);
+    });
+  });
+  const tabBtn = document.querySelector('.ptab[data-ptab="result"]');
+  if (tabBtn) tabBtn.classList.remove("hidden");
+  switchPtab("result");
+}
 function renderResults(payload) {
   if(!resultsEl) return;
   const { mode, results, total, passed } = payload;
-  const allPass = passed === total;
+  const v = verdictOf(payload);
+  const avg = runtimeAvg(results);
+  window.__consoleSel = 0;
   resultsEl.innerHTML = `
-    <div class="results-header">
-      <div class="results-title">${mode==="run" ? "Run — Visible Tests" : "Submit — All Tests"}</div>
-      <span class="results-summary ${allPass?'pass':'fail'}">${passed} / ${total} passed</span>
+    <div class="console-head">
+      <span class="${v.cls}">${v.label}</span>
+      <span class="run-meta" id="console-runtime">Runtime: ${avg} ms</span>
+      <span class="results-summary ${passed === total ? "pass" : "fail"}" style="margin-left:auto">${passed} / ${total}</span>
     </div>
-    ${runStatsHtml(results)}
     ${mode==="submit"?`<div id="complexity-line" class="run-stats" style="font-size:12px;color:var(--muted);margin:-4px 0 10px">Analyzing complexity…</div>`:""}
-    ${results.map((r,i)=>`
-      <div class="test-case ${i===0?'open':''}">
-        <div class="test-case-header">
-          <span class="test-label"><span class="dot ${r.passed?'pass':'fail'}"></span> Case ${i+1} ${r.hidden ? '(hidden)' : ''} — ${r.passed?'Passed':'Failed'}</span>
-          <span class="test-vis">${r.hidden ? 'hidden' : 'visible'}${r.timeMs!=null?` · ${r.timeMs}ms`:''}${fmtMem(r.memKb)}</span>
-        </div>
-        <div class="test-body">
-          <div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(fmtJson(r.input))}</pre></span></div>
-          <div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(fmtJson(r.expected))}</pre></span></div>
-          <div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error ? r.error : fmtJson(r.actual))}</pre></span></div>
-          ${r.error?`<div class="kv"><span class="kv-label">Error</span><span class="kv-value error"><pre>${esc(r.error)}</pre></span></div>`:""}
-        </div>
-      </div>
-    `).join("")}
+    <div class="case-pills" id="console-pills">${casePillsHtml(results, 0)}</div>
+    <div id="console-detail">${lcDetailHtml(results[0])}</div>
   `;
-  resultsEl.querySelectorAll(".test-case-header").forEach((h, idx) => {
-    h.addEventListener("click", () => h.parentElement.classList.toggle("open"));
+  const pillsEl = document.getElementById("console-pills");
+  if (pillsEl) pillsEl.querySelectorAll(".case-pill").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const i = parseInt(btn.dataset.idx, 10) || 0;
+      window.__consoleSel = i;
+      pillsEl.querySelectorAll(".case-pill").forEach(b => b.classList.toggle("active", b === btn));
+      const d = document.getElementById("console-detail");
+      if (d) d.innerHTML = lcDetailHtml(results[i]);
+      const rt = document.getElementById("console-runtime");
+      if (rt && results[i]) rt.textContent = `Runtime: ${results[i].timeMs ?? 0} ms`;
+    });
   });
   if(lastRunMeta) lastRunMeta.textContent = `${mode} · ${passed}/${total} · ${new Date().toLocaleTimeString()}`;
-  if(statusText) statusText.textContent = allPass ? "All tests passed ✓" : `${total-passed} test(s) failed`;
+  if(statusText) statusText.textContent = v.allPass ? "All tests passed ✓" : `${total-passed} test(s) failed`;
   window.__lastRun = { questionId: currentQuestion && currentQuestion.id, mode, passed, total, results, ts: Date.now() };
+  if (payload.mode === "submit") { try { showSubmitResult(payload); } catch (e) { console.warn("result view failed", e); } }
   if(isPerfActive()) renderPerformance();
 }
 
@@ -1378,6 +1475,8 @@ document.querySelectorAll(".ptab").forEach(btn=>{
     document.getElementById("ptab-"+btn.dataset.ptab).classList.add("active");
     // Right panel follows left tab: desc -> editor, submissions -> submission view (or empty)
     if(btn.dataset.ptab === "desc"){
+      showEditMode();
+    } else if(btn.dataset.ptab === "result"){
       showEditMode();
     } else if(btn.dataset.ptab === "perf"){
       renderPerformance();

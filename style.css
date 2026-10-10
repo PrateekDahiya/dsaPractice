@@ -464,6 +464,40 @@ body {
 
 .hidden{ display:none !important; }
 
+/* LeetCode-style verdict + console (submit result left tab, run console right) */
+.verdict-accepted{ color:var(--green); font-weight:800; font-size:20px; }
+.verdict-wrong{ color:var(--red); font-weight:800; font-size:20px; }
+.verdict-error{ color:var(--accent); font-weight:800; font-size:20px; }
+.lc-verdict-row{ display:flex; align-items:center; gap:10px; margin:2px 0 4px; }
+.lc-count{ color:var(--muted); font-size:13px; }
+.lc-sub{ color:var(--muted); font-size:12px; margin-bottom:12px; }
+.lc-cards{ display:flex; gap:10px; margin:0 0 12px; }
+.lc-card{ background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+.lc-card.lc-stat{ flex:1; margin-bottom:0; }
+.lc-card-label{ color:var(--muted); font-size:12px; margin-bottom:4px; }
+.lc-card-val{ font-size:16px; font-weight:700; }
+.lc-card pre{ margin:0; font-family:var(--mono); font-size:13px; white-space:pre-wrap; word-break:break-word; }
+.lc-error-card pre{ color:#ff8a9a; }
+.lc-out-fail{ color:var(--red); font-weight:700; }
+.lc-exp-fail{ color:var(--green); font-weight:700; }
+.lc-label{ color:var(--muted); font-size:12px; font-weight:600; margin:10px 0 6px; }
+.lc-param{ margin-bottom:6px; }
+.lc-param:last-child{ margin-bottom:0; }
+.lc-param-name{ color:var(--muted); font-size:12px; display:block; margin-bottom:4px; }
+.lc-param-val{ margin:0; font-size:15px; font-weight:700; }
+.lc-code-head{ color:var(--muted); font-size:12px; font-weight:600; margin:14px 0 6px; }
+.lc-code{ background:#0f1117; border:1px solid var(--border); border-radius:8px; padding:12px; font-family:var(--mono); font-size:12.5px; line-height:1.6; overflow:auto; max-height:320px; white-space:pre; }
+.console-head{ display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.console-head .verdict-accepted, .console-head .verdict-wrong, .console-head .verdict-error{ font-size:17px; }
+.run-meta{ color:var(--muted); font-size:13px; }
+.case-pills{ display:flex; gap:10px; flex-wrap:wrap; margin:2px 0 12px; }
+.case-pill{ display:inline-flex; align-items:center; gap:6px; background:transparent; border:none; color:var(--muted); font-size:13px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer; }
+.case-pill .pill-icon{ font-size:12px; }
+.case-pill.pass .pill-icon{ color:var(--green); }
+.case-pill.fail .pill-icon{ color:var(--red); }
+.case-pill:hover{ color:var(--text); }
+.case-pill.active{ background:var(--panel2); color:var(--text); }
+
 @media (max-width: 900px) {
   .container { flex-direction: column; overflow-y: auto; }
   .sidebar { width: 100% !important; max-height: 60vh; }

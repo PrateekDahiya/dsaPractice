@@ -58,6 +58,7 @@
       <section class="problem-pane" id="problem-pane" style="flex:1.1">
         <div class="problem-tabs">
           <button class="ptab active" data-ptab="desc">Description</button>
+          <button class="ptab hidden" data-ptab="result" id="result-tab-btn">Result</button>
           <button class="ptab" data-ptab="submissions">Submissions</button>
           <button class="ptab" data-ptab="perf">Performance</button>
         </div>
@@ -68,6 +69,9 @@
               <p>Choose a question from the left. Write code on the right, hit <strong>Run</strong> for visible tests or <strong>Submit</strong> for all tests.</p>
             </div>
           </div>
+        </div>
+        <div id="ptab-result" class="ptab-panel">
+          <div id="result-view"><div class="empty-state"><h2>No submission yet</h2><p>Hit <strong>Submit</strong> to see your verdict here, LeetCode-style.</p></div></div>
         </div>
         <div id="ptab-submissions" class="ptab-panel">
           <div class="submissions-header">
