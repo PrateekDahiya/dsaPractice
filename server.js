@@ -33,6 +33,12 @@ let dbReady = false;
 let useDb = !!db;
 let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
 let dailyCache = { date: "", payload: null }; // daily challenge (UTC date -> pick)
+const dailyGenInflight = new Set(); // UTC dates with a daily generation running
+const DAILY_TOPICS = [
+  "Arrays and hashing", "Two pointers", "Sliding window", "Stacks and queues",
+  "Binary search", "Linked lists", "Trees and traversals", "Heaps and top-K",
+  "Intervals", "Greedy algorithms", "Dynamic programming basics", "Bit manipulation",
+];
 // ---------- lint guards: single-flight + cache + rate limit (OOM fix for /api/lint) ----------
 const lintStats = { total: 0, cacheHits: 0, rateLimited: 0, execRejected: 0 };
 let lintInflightCpp = 0; // max 1 concurrent g++ lint process
@@ -525,7 +531,8 @@ async function persistQuestion(q, u) {
     fs.writeFileSync(filePath, JSON.stringify(q, null, 2), "utf8");
     console.log(`Created ${filePath}`);
   }
-  cache.questions = null; // invalidate
+  cache.questions = null;
+  dailyCache = { date: "", payload: null }; // daily may reference it // invalidate
   try { questionCache.delete(q.id); } catch {}
   cache.leaderboard.clear();
   return { savedToDb };
@@ -1351,33 +1358,79 @@ const server = http.createServer(async (req, res) => {
         } catch (e) { console.warn("stale-ai delete skipped", r.id, e.message); }
       }
       cache.questions = null;
+  dailyCache = { date: "", payload: null }; // daily may reference it
       cache.leaderboard.clear();
       console.log(`Admin ${u.username} pruned ${deleted.length} stale AI questions`);
       return sendJson(res, { ok: true, deleted }, 200);
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
   }
 
-  // ---------- Daily challenge (deterministic UTC rotation, Medium/Hard) ----------
-  // No cron needed (Render free sleeps): derived on demand from the date, so
-  // every instance and user sees the same question all day, globally.
+  // ---------- Daily challenge: one AI-generated Medium/Hard question per UTC day ----------
+  // No cron needed (Render free sleeps): today's question is found by its
+  // `daily:<date>` tag; the dashboard triggers POST /ensure once when it's
+  // missing, otherwise GET falls back to a deterministic rotation pick.
   if (pathname === "/api/daily" && req.method === "GET") {
     try {
       const today = new Date().toISOString().slice(0, 10);
-      if (dailyCache.date !== today || !dailyCache.payload) {
-        const qs = await loadQuestions();
-        const eligible = (arr) => (arr || []).filter((q) => q && q.visibleTestCases && q.visibleTestCases.length);
-        let pool = eligible((qs || []).filter((q) => q.difficulty === "Medium" || q.difficulty === "Hard"));
-        if (!pool.length) pool = eligible(qs);
-        if (!pool.length) return sendJson(res, { error: "No questions available" }, 404);
-        const h = crypto.createHash("sha256").update("daily:" + today).digest();
-        const pick = pool[h.readUInt32BE(0) % pool.length];
-        dailyCache = {
-          date: today,
-          payload: { date: today, questionId: pick.id, title: pick.title, difficulty: pick.difficulty, tags: pick.tags || [] },
-        };
+      if (dailyCache.payload && dailyCache.payload.date === today) {
+        return sendJson(res, dailyCache.payload, 200);
       }
+      const generated = await findDailyQuestion(today);
+      if (generated) {
+        dailyCache = { date: today, payload: dailyPayload(generated, true, today) };
+        return sendJson(res, dailyCache.payload, 200);
+      }
+      const qs = await loadQuestions();
+      const eligible = (arr) => (arr || []).filter((q) => q && q.visibleTestCases && q.visibleTestCases.length);
+      let pool = eligible((qs || []).filter((q) => q.difficulty === "Medium" || q.difficulty === "Hard"));
+      if (!pool.length) pool = eligible(qs);
+      if (!pool.length) return sendJson(res, { error: "No questions available" }, 404);
+      const h = crypto.createHash("sha256").update("daily:" + today).digest();
+      const pick = pool[h.readUInt32BE(0) % pool.length];
+      dailyCache = {
+        date: today,
+        payload: { date: today, generated: false, questionId: pick.id, title: pick.title, difficulty: pick.difficulty, tags: pick.tags || [] },
+      };
       return sendJson(res, dailyCache.payload, 200);
     } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname === "/api/daily/ensure" && req.method === "POST") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    try {
+      if (!process.env.GROQ_API_KEY) return sendJson(res, { generated: false, error: "AI generation not configured (GROQ_API_KEY missing)" }, 503);
+      const today = new Date().toISOString().slice(0, 10);
+      const existing = await findDailyQuestion(today);
+      if (existing) {
+        dailyCache = { date: today, payload: dailyPayload(existing, true, today) };
+        return sendJson(res, { generated: true, already: true, questionId: existing.id }, 200);
+      }
+      const now = Date.now();
+      const last = genRate.get(u.id) || 0;
+      if (now - last < GEN_MIN_GAP_MS) return sendJson(res, { generated: false, error: "Rate limited: try again shortly" }, 429);
+      if (dailyGenInflight.has(today)) return sendJson(res, { generated: false, error: "Generation already in progress for today" }, 429);
+      genRate.set(u.id, now);
+      dailyGenInflight.add(today);
+      try {
+        const spec = dailySpecFor(today);
+        const result = await runQuestionGeneration({
+          topic: spec.topic, difficulty: spec.difficulty, model: undefined,
+          extraTags: ["daily:" + today], user: u,
+        });
+        dailyCache = {
+          date: today,
+          payload: { date: today, generated: true, questionId: result.id, title: result.title, difficulty: result.difficulty, tags: ["ai-generated", "daily:" + today] },
+        };
+        console.log(`Daily question generated for ${today}: ${result.id} by ${u.username}`);
+        return sendJson(res, { generated: true, questionId: result.id, title: result.title }, 201);
+      } finally {
+        dailyGenInflight.delete(today);
+      }
+    } catch (e) {
+      if (e && e.status) return sendJson(res, { generated: false, error: e.message }, e.status);
+      console.error("daily ensure failed:", e);
+      return sendJson(res, { generated: false, error: "Generation failed: " + e.message }, 500);
+    }
   }
   if (pathname === "/api/questions/solved" && req.method === "GET") {
     tryAuthenticate(req);
@@ -1562,6 +1615,7 @@ const server = http.createServer(async (req, res) => {
           try { fs.unlinkSync(path.join(QUESTIONS_DIR, `${qid}.json`)); } catch {}
           try { questionCache.delete(qid); } catch {}
           cache.questions = null;
+  dailyCache = { date: "", payload: null }; // daily may reference it
           cache.leaderboard.clear();
           console.log(`Question deleted: ${qid} by ${u.username}${isAdmin(u) ? " (admin)" : ""}`);
           return sendJson(res, { ok: true, id: qid }, 200);
@@ -1589,6 +1643,7 @@ const server = http.createServer(async (req, res) => {
         } catch (e) { console.warn("question file backup failed:", e.message); }
         try { questionCache.delete(qid); } catch {}
         cache.questions = null;
+  dailyCache = { date: "", payload: null }; // daily may reference it
         cache.leaderboard.clear();
         console.log(`Question updated: ${qid} by ${u.username}${isAdmin(u) ? " (admin)" : ""}`);
         return sendJson(res, { ok: true, id: qid }, 200);
@@ -1599,6 +1654,132 @@ const server = http.createServer(async (req, res) => {
       }
     });
     return;
+  }
+
+  // Shared AI question-generation core (used by manual /generate and daily ensure).
+  // Throws Error with .status on failure; returns {id,title,difficulty,visible,hidden,model,attempts}.
+  async function runQuestionGeneration({ topic, difficulty, model, extraTags, user }) {
+    const { runJS } = require("./server/utils/runner");
+    const { groqChat, extractJson, buildGenerationPrompt, validateDraft } = require("./server/utils/groq");
+    const messages = buildGenerationPrompt(topic, difficulty, extraTags);
+    const MAX_ATTEMPTS = 3;
+    let draft = null, usedModel = null, visibleTestCases = null, hiddenTestCases = null;
+    let lastError = "unknown error", attempts = 0;
+    for (attempts = 1; attempts <= MAX_ATTEMPTS; attempts++) {
+      let content;
+      try {
+        const r = await groqChat(messages, model);
+        content = r.content; usedModel = r.model;
+      } catch (e) {
+        lastError = e.message; // transport / Groq rate errors: surface immediately, don't burn retries
+        break;
+      }
+      messages.push({ role: "assistant", content });
+      let reasons = [];
+      try { draft = extractJson(content); }
+      catch { reasons.push("output was not valid JSON"); draft = null; }
+      if (draft) {
+        reasons = validateDraft(draft, difficulty);
+        if (!reasons.length) {
+          const badIn = validateTestCaseInputs([...draft.testInputsVisible, ...draft.testInputsHidden], draft.params);
+          if (badIn) reasons.push(badIn);
+        }
+        if (!reasons.length) {
+          const existing = await getQuestionById(draft.id);
+          if (existing) reasons.push(`id "${draft.id}" already exists — pick a different slug`);
+        }
+      }
+      if (!reasons.length) {
+        // oracle: run reference solution to compute every expectedOutput
+        const shell = { id: draft.id, functionName: draft.functionName, params: draft.params };
+        try {
+          const fill = (list) => list.map((tc, i) => {
+            let actual;
+            try { actual = runJS(draft.referenceSolution, shell, tc.input, null); }
+            catch (e) { throw new Error(`reference solution failed on test input ${tc.id}: ${e.message}`); }
+            try { actual = JSON.parse(JSON.stringify(actual)); }
+            catch { throw new Error(`reference solution returned non-serializable output on ${tc.id}`); }
+            if (actual === undefined) throw new Error(`reference solution returned undefined on ${tc.id}`);
+            return { id: tc.id || `t${i + 1}`, input: tc.input, expectedOutput: actual };
+          });
+          const v = fill(draft.testInputsVisible), h = fill(draft.testInputsHidden);
+          const outs = [...v, ...h].map(tc => JSON.stringify(tc.expectedOutput));
+          const ins = [...v, ...h].map(tc => JSON.stringify(tc.input));
+          if (new Set(outs).size === 1 && new Set(ins).size > 1) {
+            throw new Error("reference solution returns the same output for every input — it is likely wrong");
+          }
+          visibleTestCases = v; hiddenTestCases = h;
+        } catch (e) { reasons.push(e.message); }
+      }
+      if (!reasons.length) break;
+      lastError = reasons.join("; ");
+      console.warn(`generate attempt ${attempts} invalid: ${lastError}`);
+      messages.push({ role: "user", content: `Your previous draft failed validation: ${lastError}. Fix ONLY those issues and output the FULL corrected JSON object again (no prose, no fences).` });
+      draft = null; visibleTestCases = null; hiddenTestCases = null;
+    }
+    if (!draft || !visibleTestCases) {
+      const e = new Error(`AI could not produce a valid question after ${attempts} attempt(s): ${lastError}`);
+      e.status = 502;
+      throw e;
+    }
+    const tagSet = ["ai-generated", ...(Array.isArray(draft.tags) ? draft.tags.filter(t => typeof t === "string") : []), ...extraTags];
+    const q = {
+      id: draft.id,
+      title: draft.title,
+      difficulty,
+      tags: [...new Set(tagSet)],
+      problemStatement: draft.problemStatement,
+      constraints: Array.isArray(draft.constraints) ? draft.constraints : [],
+      timeComplexity: draft.timeComplexity || undefined,
+      spaceComplexity: draft.spaceComplexity || undefined,
+      examples: draft.examples,
+      functionName: draft.functionName,
+      pythonFunctionName: draft.pythonFunctionName || undefined,
+      cppFunctionName: draft.cppFunctionName || undefined,
+      params: draft.params,
+      starterCode: draft.starterCode,
+      visibleTestCases,
+      hiddenTestCases,
+      referenceSolution: draft.referenceSolution,
+      generatedBy: "groq:" + usedModel,
+    };
+    if (!q.pythonFunctionName) delete q.pythonFunctionName;
+    if (!q.cppFunctionName) delete q.cppFunctionName;
+    if (!q.timeComplexity) delete q.timeComplexity;
+    if (!q.spaceComplexity) delete q.spaceComplexity;
+    const errs = validateQuestionPayload(q);
+    if (errs.length) {
+      const e = new Error("Generated question invalid: " + errs.join("; "));
+      e.status = 502;
+      throw e;
+    }
+    await persistQuestion(q, user);
+    return {
+      id: q.id, title: q.title, difficulty: q.difficulty,
+      visible: visibleTestCases.length, hidden: hiddenTestCases.length, model: usedModel, attempts,
+    };
+  }
+
+  // ---------- Daily challenge helpers ----------
+  function dailySpecFor(dateStr) {
+    // deterministic per day: topic rotates, difficulty alternates Medium/Hard
+    const dayNum = Math.floor(new Date(dateStr + "T00:00:00Z").getTime() / 86400000);
+    return {
+      topic: DAILY_TOPICS[((dayNum % DAILY_TOPICS.length) + DAILY_TOPICS.length) % DAILY_TOPICS.length],
+      difficulty: dayNum % 2 === 0 ? "Medium" : "Hard",
+    };
+  }
+  async function findDailyQuestion(dateStr) {
+    const tag = "daily:" + dateStr;
+    const qs = await loadQuestions();
+    return (qs || []).find((q) => Array.isArray(q.tags) && q.tags.includes(tag)) || null;
+  }
+  function dailyPayload(q, generated, dateStr) {
+    return {
+      date: dateStr,
+      generated: !!generated,
+      questionId: q.id, title: q.title, difficulty: q.difficulty, tags: q.tags || [],
+    };
   }
 
   // AI models available for question generation
@@ -1639,98 +1820,10 @@ const server = http.createServer(async (req, res) => {
         genRate.set(u.id, now);
         genInflight.add(u.id);
         try {
-          const { runJS } = require("./server/utils/runner");
-          const { groqChat, extractJson, buildGenerationPrompt, validateDraft, ALLOWED_MODELS, DEFAULT_MODEL } = require("./server/utils/groq");
-          const messages = buildGenerationPrompt(topic, difficulty, extraTags);
-          const MAX_ATTEMPTS = 3;
-          let draft = null, usedModel = null, visibleTestCases = null, hiddenTestCases = null;
-          let lastError = "unknown error", attempts = 0;
-          for (attempts = 1; attempts <= MAX_ATTEMPTS; attempts++) {
-            let content;
-            try {
-              const r = await groqChat(messages, model);
-              content = r.content; usedModel = r.model;
-            } catch (e) {
-              lastError = e.message; // transport / Groq rate errors: surface immediately, don't burn retries
-              break;
-            }
-            messages.push({ role: "assistant", content });
-            let reasons = [];
-            try { draft = extractJson(content); }
-            catch { reasons.push("output was not valid JSON"); draft = null; }
-            if (draft) {
-              reasons = validateDraft(draft, difficulty);
-              if (!reasons.length) {
-                const badIn = validateTestCaseInputs([...draft.testInputsVisible, ...draft.testInputsHidden], draft.params);
-                if (badIn) reasons.push(badIn);
-              }
-              if (!reasons.length) {
-                const existing = await getQuestionById(draft.id);
-                if (existing) reasons.push(`id "${draft.id}" already exists — pick a different slug`);
-              }
-            }
-            if (!reasons.length) {
-              // oracle: run reference solution to compute every expectedOutput
-              const shell = { id: draft.id, functionName: draft.functionName, params: draft.params };
-              try {
-                const fill = (list) => list.map((tc, i) => {
-                  let actual;
-                  try { actual = runJS(draft.referenceSolution, shell, tc.input, null); }
-                  catch (e) { throw new Error(`reference solution failed on test input ${tc.id}: ${e.message}`); }
-                  try { actual = JSON.parse(JSON.stringify(actual)); }
-                  catch { throw new Error(`reference solution returned non-serializable output on ${tc.id}`); }
-                  if (actual === undefined) throw new Error(`reference solution returned undefined on ${tc.id}`);
-                  return { id: tc.id || `t${i + 1}`, input: tc.input, expectedOutput: actual };
-                });
-                const v = fill(draft.testInputsVisible), h = fill(draft.testInputsHidden);
-                const outs = [...v, ...h].map(tc => JSON.stringify(tc.expectedOutput));
-                const ins = [...v, ...h].map(tc => JSON.stringify(tc.input));
-                if (new Set(outs).size === 1 && new Set(ins).size > 1) {
-                  throw new Error("reference solution returns the same output for every input — it is likely wrong");
-                }
-                visibleTestCases = v; hiddenTestCases = h;
-              } catch (e) { reasons.push(e.message); }
-            }
-            if (!reasons.length) break;
-            lastError = reasons.join("; ");
-            console.warn(`generate attempt ${attempts} invalid: ${lastError}`);
-            messages.push({ role: "user", content: `Your previous draft failed validation: ${lastError}. Fix ONLY those issues and output the FULL corrected JSON object again (no prose, no fences).` });
-            draft = null; visibleTestCases = null; hiddenTestCases = null;
-          }
-          if (!draft || !visibleTestCases) {
-            return sendJson(res, { error: `AI could not produce a valid question after ${attempts} attempt(s): ${lastError}` }, 502);
-          }
-          const tagSet = ["ai-generated", ...(Array.isArray(draft.tags) ? draft.tags.filter(t => typeof t === "string") : []), ...extraTags];
-          const q = {
-            id: draft.id,
-            title: draft.title,
-            difficulty,
-            tags: [...new Set(tagSet)],
-            problemStatement: draft.problemStatement,
-            constraints: Array.isArray(draft.constraints) ? draft.constraints : [],
-            timeComplexity: draft.timeComplexity || undefined,
-            spaceComplexity: draft.spaceComplexity || undefined,
-            examples: draft.examples,
-            functionName: draft.functionName,
-            pythonFunctionName: draft.pythonFunctionName || undefined,
-            cppFunctionName: draft.cppFunctionName || undefined,
-            params: draft.params,
-            starterCode: draft.starterCode,
-            visibleTestCases,
-            hiddenTestCases,
-            referenceSolution: draft.referenceSolution,
-            generatedBy: "groq:" + usedModel,
-          };
-          if (!q.pythonFunctionName) delete q.pythonFunctionName;
-          if (!q.cppFunctionName) delete q.cppFunctionName;
-          if (!q.timeComplexity) delete q.timeComplexity;
-          if (!q.spaceComplexity) delete q.spaceComplexity;
-          const errs = validateQuestionPayload(q);
-          if (errs.length) return sendJson(res, { error: "Generated question invalid: " + errs.join("; ") }, 502);
-          await persistQuestion(q, u);
+          const result = await runQuestionGeneration({ topic, difficulty, model, extraTags, user: u });
           return sendJson(res, {
-            ok: true, id: q.id, title: q.title, difficulty: q.difficulty,
-            visible: visibleTestCases.length, hidden: hiddenTestCases.length, model: usedModel, attempts,
+            ok: true, id: result.id, title: result.title, difficulty: result.difficulty,
+            visible: result.visible, hidden: result.hidden, model: result.model, attempts: result.attempts,
           }, 201);
         } finally {
           genInflight.delete(u.id);

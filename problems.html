@@ -19,13 +19,13 @@
       <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text);display:flex;align-items:center;gap:8px"><img src="public/logo.png" alt="Logo" style="height:32px;width:auto;border-radius:6px;object-fit:contain"> DSA Practice</a>
       <nav class="topbar-nav">
         <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="index.html" class="ghost-link">Problems</a>
         <a href="problems.html" class="ghost-link active">Browse</a>
         <a href="roadmap.html" class="ghost-link">Roadmap</a>
         <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
       </nav>
     </div>
     <div class="topbar-right">
-      <a href="index.html" class="ghost-link">Problems</a>
       <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
     </div>
   </header>
@@ -91,7 +91,7 @@
       const a=$("#auth-area");
       if(!a) return;
       if(user && getToken()){
-        a.innerHTML=`<a href="dashboard.html" style="font-weight:600;font-size:13px;color:var(--text);text-decoration:none">${esc(user.username)}</a><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
+        a.innerHTML=`<a href="settings.html" style="font-weight:600;font-size:13px;color:var(--text);text-decoration:none" title="Account settings">${esc(user.username)}</a><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
         document.getElementById("logout-btn")?.addEventListener("click",()=>{ clearAuth(); location.reload(); });
       } else {
         a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;

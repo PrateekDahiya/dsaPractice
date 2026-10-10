@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — DSA Practice</title>
+  <link rel="icon" type="image/png" href="public/logo.png" />
+  <link rel="stylesheet" href="public/css/base.css" />
+  <link rel="stylesheet" href="public/css/layout.css" />
+  <link rel="stylesheet" href="public/css/editor.css" />
+  <link rel="stylesheet" href="public/css/components.css" />
+  <link rel="stylesheet" href="public/css/pages.css" />
+  <link rel="stylesheet" href="public/css/responsive.css" />
+</head>
+<body style="overflow:auto;height:auto;min-height:100vh">
+  <div id="top-loader" class="top-loader"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a href="dashboard.html" class="logo" style="text-decoration:none;color:var(--text);display:flex;align-items:center;gap:8px"><img src="public/logo.png" alt="Logo" style="height:32px;width:auto;border-radius:6px;object-fit:contain"> DSA Practice</a>
+      <nav class="topbar-nav">
+        <a href="dashboard.html" class="ghost-link">Dashboard</a>
+        <a href="index.html" class="ghost-link">Problems</a>
+        <a href="problems.html" class="ghost-link">Browse</a>
+        <a href="roadmap.html" class="ghost-link">Roadmap</a>
+        <a href="leaderboard.html" class="ghost-link">Leaderboard</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <span id="auth-area" style="display:flex;gap:8px;align-items:center"></span>
+    </div>
+  </header>
+
+  <div class="lb-wrap" style="max-width:760px">
+    <h1 style="font-size:22px;margin-bottom:14px">Settings</h1>
+    <div id="settings-root"><div class="loading">Loading…</div></div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const $=s=>document.querySelector(s);
+    const toastEl=$("#toast");
+    function toast(m){ toastEl.textContent=m; toastEl.classList.remove("hidden"); setTimeout(()=>toastEl.classList.add("hidden"),2500); }
+    function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function getToken(){ return localStorage.getItem("token"); }
+    function getUser(){ try{ return JSON.parse(localStorage.getItem("user")||"null"); }catch{ return null; } }
+    function clearAuth(){ localStorage.removeItem("token"); localStorage.removeItem("user"); }
+    function authHeaders(h={}){ const t=getToken(); if(t) h["Authorization"]="Bearer "+t; return h; }
+    function updateTopbar(){
+      const user=getUser();
+      const a=$("#auth-area");
+      if(!a) return;
+      if(user && getToken()){
+        a.innerHTML=`<a href="settings.html" style="font-weight:600;font-size:13px;color:var(--text);text-decoration:none">${esc(user.username)}</a><button id="logout-btn" class="btn ghost" style="padding:6px 10px;font-size:12px">Logout</button>`;
+        document.getElementById("logout-btn")?.addEventListener("click",()=>{ clearAuth(); location.href="login.html"; });
+      } else {
+        a.innerHTML=`<a href="login.html" class="ghost-link" style="padding:6px 10px">Login</a><a href="register.html" class="btn primary" style="padding:6px 10px">Register</a>`;
+      }
+    }
+
+    async function init(){
+      const root=document.getElementById("settings-root");
+      updateTopbar();
+      const t=getToken();
+      if(!t){ location.href="login.html"; return; }
+      let me;
+      try{
+        const r=await fetch("/api/me",{headers:{Authorization:"Bearer "+t}});
+        if(!r.ok) throw new Error();
+        me=await r.json();
+        localStorage.setItem("user",JSON.stringify(me));
+        updateTopbar();
+      }catch{ clearAuth(); location.href="login.html"; return; }
+      const avatarHtml=me.avatar?`<img src="${esc(me.avatar)}" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display='none'">`:`<span style="width:64px;height:64px;border-radius:50%;background:var(--panel2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:22px">${esc((me.username||"?").slice(0,1).toUpperCase())}</span>`;
+      root.innerHTML=`
+        <div class="list-card" style="margin-bottom:16px;display:flex;gap:14px;align-items:flex-start">
+          ${avatarHtml}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:17px;font-weight:800">${esc(me.username)}</div>
+            <div style="color:var(--muted);font-size:13px;margin-top:4px;white-space:pre-wrap;word-break:break-word">${me.bio?esc(me.bio):"Add a bio so others know you."}</div>
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button id="profile-edit-btn" class="btn ghost" style="padding:5px 10px;font-size:12px">Edit profile</button></div>
+            <div id="profile-form" class="hidden" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+              <label style="font-size:12px;color:var(--muted)">Avatar image URL<input id="profile-avatar" placeholder="https://..." style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;width:100%"></label>
+              <label style="font-size:12px;color:var(--muted)">Bio (max 500)<textarea id="profile-bio" rows="2" maxlength="500" placeholder="Short bio..." style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;width:100%;resize:vertical"></textarea></label>
+              <div style="display:flex;gap:8px"><button id="profile-save-btn" class="btn primary" style="padding:6px 12px;font-size:12px">Save</button><span id="profile-msg" style="font-size:12px;color:var(--muted)"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="list-card" style="margin-bottom:16px">
+          <h3>Account</h3>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+              <label style="font-size:12px;color:var(--muted)">Current password<input id="pw-cur" type="password" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;display:block;margin-top:4px"></label>
+              <label style="font-size:12px;color:var(--muted)">New password (min 6)<input id="pw-new" type="password" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;display:block;margin-top:4px"></label>
+              <button id="pw-change-btn" class="btn secondary" style="padding:7px 12px;font-size:12px">Change password</button>
+              <span id="pw-msg" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="export-btn" class="btn ghost" style="padding:6px 12px;font-size:12px">⬇ Export my data (JSON)</button>
+              <button id="delete-acct-btn" class="btn ghost" style="padding:6px 12px;font-size:12px;color:var(--red);border-color:rgba(255,55,87,0.4)">Delete account…</button>
+            </div>
+          </div>
+        </div>`;
+      document.getElementById("profile-edit-btn").addEventListener("click",()=>{
+        const f=document.getElementById("profile-form");
+        f.classList.toggle("hidden");
+        if(!f.classList.contains("hidden")){
+          const meNow=getUser()||{};
+          document.getElementById("profile-avatar").value=meNow.avatar||"";
+          document.getElementById("profile-bio").value=meNow.bio||"";
+        }
+      });
+      document.getElementById("profile-save-btn").addEventListener("click", async (ev)=>{
+        const sb=ev.target, msg=document.getElementById("profile-msg");
+        const avatar=document.getElementById("profile-avatar").value.trim();
+        const bio=document.getElementById("profile-bio").value;
+        sb.disabled=true;
+        try{
+          const r=await fetch("/api/me",{method:"PUT",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({avatar,bio})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.error||"save failed");
+          const cur=getUser()||{};
+          localStorage.setItem("user",JSON.stringify({...cur,avatar:d.avatar||null,bio:d.bio||null}));
+          if(msg) msg.textContent="Saved ✓";
+          toast("Profile updated");
+          setTimeout(()=>init(), 600);
+        }catch(e){
+          if(msg) msg.textContent="Failed: "+e.message;
+          toast("Profile save failed: "+e.message);
+        }finally{ sb.disabled=false; }
+      });
+      document.getElementById("pw-change-btn").addEventListener("click", async (ev)=>{
+        const pwb=ev.target, msg=document.getElementById("pw-msg");
+        const cur=document.getElementById("pw-cur").value;
+        const nw=document.getElementById("pw-new").value;
+        pwb.disabled=true;
+        try{
+          const r=await fetch("/api/me/password",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({currentPassword:cur,newPassword:nw})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.error||"change failed");
+          if(msg) msg.textContent="Password changed ✓";
+          document.getElementById("pw-cur").value="";
+          document.getElementById("pw-new").value="";
+          toast("Password changed");
+        }catch(e){
+          if(msg) msg.textContent="Failed: "+e.message;
+          toast("Password change failed: "+e.message);
+        }finally{ pwb.disabled=false; }
+      });
+      document.getElementById("export-btn").addEventListener("click", async ()=>{
+        try{
+          const r=await fetch("/api/me/export",{headers:authHeaders({})});
+          if(!r.ok) throw new Error("export failed ("+r.status+")");
+          const blob=await r.blob();
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement("a");
+          a.href=url; a.download="dsa-export.json"; a.click();
+          setTimeout(()=>URL.revokeObjectURL(url), 5000);
+          toast("Export downloaded");
+        }catch(e){ toast("Export failed: "+e.message); }
+      });
+      document.getElementById("delete-acct-btn").addEventListener("click", async ()=>{
+        const pw=prompt("Type your password to PERMANENTLY delete your account, submissions, saves and bookmarks. Questions you added stay (anonymized).");
+        if(pw===null) return;
+        if(!pw){ toast("Password required"); return; }
+        if(!confirm("Last chance — delete everything?")) return;
+        try{
+          const r=await fetch("/api/me",{method:"DELETE",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({password:pw})});
+          const d=await r.json().catch(()=>({}));
+          if(!r.ok) throw new Error(d.error||"delete failed");
+          clearAuth();
+          toast("Account deleted");
+          setTimeout(()=>{ location.href="register.html"; }, 800);
+        }catch(e){ toast("Delete failed: "+e.message); }
+      });
+    }
+    init();
+  </script>
+</body>
+</html>

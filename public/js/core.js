@@ -97,7 +97,7 @@ function updateTopbar(user){
   if(user){
     if(navDash) navDash.classList.remove("hidden");
     authArea.innerHTML = `
-      <a href="dashboard.html" style="color:var(--text);text-decoration:none;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
+      <a href="settings.html" style="color:var(--text);text-decoration:none;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px" title="Account settings">
         <span style="width:26px;height:26px;border-radius:50%;background:var(--panel2);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:11px">${esc(user.username.slice(0,2).toUpperCase())}</span>
         ${esc(user.username)}
       </a>

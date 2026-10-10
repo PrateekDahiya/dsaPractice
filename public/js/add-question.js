@@ -64,6 +64,24 @@ function openEditModal(q) {
   const clean = { ...q };
   delete clean._createdAt; delete clean._file;
   jsonTextarea.value = JSON.stringify(clean, null, 2);
+  // prefill the guided form too (best-effort; JSON tab stays source of truth on save)
+  try {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set("f-id", q.id || "");
+    set("f-title", q.title || "");
+    set("f-diff", ["Easy","Medium","Hard"].includes(q.difficulty) ? q.difficulty : "Easy");
+    set("f-tags", (q.tags || []).join(", "));
+    set("f-fn", q.functionName || "");
+    set("f-pyfn", q.pythonFunctionName || "");
+    set("f-params", (q.params || []).join(", "));
+    set("f-statement", q.problemStatement || "");
+    set("f-constraints", (q.constraints || []).join("\n"));
+    set("f-examples", JSON.stringify(q.examples || [], null, 2));
+    set("f-starter-js", (q.starterCode && q.starterCode.javascript) || "");
+    set("f-starter-py", (q.starterCode && q.starterCode.python) || "");
+    set("f-visible", JSON.stringify(q.visibleTestCases || [], null, 2));
+    set("f-hidden", JSON.stringify(q.hiddenTestCases || [], null, 2));
+  } catch {}
   if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = `Update ${q.id}`; }
   modal.classList.remove("hidden");
   if(jsonError) jsonError.classList.add("hidden");
