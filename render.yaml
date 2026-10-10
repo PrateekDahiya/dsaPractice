@@ -13,7 +13,7 @@ services:
       - key: UV_THREADPOOL_SIZE
         value: 4
       - key: ENABLE_PCH
-        value: 0
+        value: 1
       - key: DB_POOL_MAX
         value: 2
       - key: EXEC_MAX_CPP

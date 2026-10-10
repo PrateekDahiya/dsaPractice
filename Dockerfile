@@ -19,7 +19,7 @@ EXPOSE 3000
 ENV NODE_ENV=production \
     NODE_OPTIONS=--max-old-space-size=320 \
     UV_THREADPOOL_SIZE=4 \
-    ENABLE_PCH=0 \
+    ENABLE_PCH=1 \
     DB_POOL_MAX=2
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
