@@ -1160,6 +1160,74 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
+  if (pathname === "/api/me/password" && req.method === "POST") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { currentPassword, newPassword } = JSON.parse(body || "{}");
+        if (!currentPassword || !newPassword) {
+          return sendJson(res, { error: "Missing fields: currentPassword, newPassword" }, 400);
+        }
+        if (typeof newPassword !== "string" || newPassword.length < 6) {
+          return sendJson(res, { error: "New password must be at least 6 characters" }, 400);
+        }
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const row = await db.findUserById(u.id);
+        if (!row) return sendJson(res, { error: "User not found" }, 404);
+        if (!verifyPassword(currentPassword, row.password_hash)) {
+          return sendJson(res, { error: "Current password is incorrect" }, 401);
+        }
+        await db.updatePassword(u.id, hashPassword(newPassword));
+        console.log(`Password changed: ${u.username}`);
+        return sendJson(res, { ok: true }, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
+  if (pathname === "/api/me/export" && req.method === "GET") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    try {
+      await ensureDb();
+      if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+      const data = await db.exportUserData(u.id);
+      if (!data) return sendJson(res, { error: "User not found" }, 404);
+      const body = JSON.stringify(data, null, 2);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Disposition": `attachment; filename="dsa-export-${u.username}.json"`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      return res.end(body);
+    } catch (e) { return sendJson(res, { error: e.message }, 500); }
+  }
+  if (pathname === "/api/me" && req.method === "DELETE") {
+    const u = requireAuth(req, res);
+    if (!u) return;
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { password } = JSON.parse(body || "{}");
+        if (!password) return sendJson(res, { error: "Password confirmation required" }, 400);
+        await ensureDb();
+        if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
+        const row = await db.findUserById(u.id);
+        if (!row) return sendJson(res, { error: "User not found" }, 404);
+        if (!verifyPassword(password, row.password_hash)) {
+          return sendJson(res, { error: "Password is incorrect" }, 401);
+        }
+        await db.deleteUser(u.id);
+        console.log(`Account deleted: ${u.username} (id ${u.id})`);
+        return sendJson(res, { ok: true }, 200);
+      } catch (e) { return sendJson(res, { error: e.message }, 500); }
+    });
+    return;
+  }
 
   // ---------- Admin APIs ----------
   if (pathname === "/api/admin/users" && req.method === "GET") {

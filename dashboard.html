@@ -227,6 +227,21 @@
           <a href="index.html#${esc(daily.questionId)}" class="btn primary" style="padding:6px 14px;text-decoration:none">Solve →</a>
         </div>`:""}
         ${profileCard}
+        ${!isOther?`<div class="list-card" style="margin-bottom:16px">
+          <h3>Account</h3>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+              <label style="font-size:12px;color:var(--muted)">Current password<input id="pw-cur" type="password" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;display:block;margin-top:4px"></label>
+              <label style="font-size:12px;color:var(--muted)">New password (min 6)<input id="pw-new" type="password" style="background:#0f1117;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;display:block;margin-top:4px"></label>
+              <button id="pw-change-btn" class="btn secondary" style="padding:7px 12px;font-size:12px">Change password</button>
+              <span id="pw-msg" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="export-btn" class="btn ghost" style="padding:6px 12px;font-size:12px">⬇ Export my data (JSON)</button>
+              <button id="delete-acct-btn" class="btn ghost" style="padding:6px 12px;font-size:12px;color:var(--red);border-color:rgba(255,55,87,0.4)">Delete account…</button>
+            </div>
+          </div>
+        </div>`:""}
         <div class="dash-grid">
           <div class="ring-card">
             ${renderRing(stats.solved, stats.total)}
@@ -260,6 +275,53 @@
         ${isOther? `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Read-only view — code history hidden for privacy.</div>` : `<div style="margin-top:16px;padding:12px;background:#15181f;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:13px">Your submissions are private and scoped per user. Code autosaves every 10s to DB with your token.</div>`}
       `;
       if(!isOther){
+        const pwb=document.getElementById("pw-change-btn");
+        if(pwb) pwb.addEventListener("click", async ()=>{
+          const msg=document.getElementById("pw-msg");
+          const cur=document.getElementById("pw-cur").value;
+          const nw=document.getElementById("pw-new").value;
+          pwb.disabled=true;
+          try{
+            const r=await fetch("/api/me/password",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({currentPassword:cur,newPassword:nw})});
+            const d=await r.json().catch(()=>({}));
+            if(!r.ok) throw new Error(d.error||"change failed");
+            if(msg){ msg.textContent="Password changed ✓"; }
+            document.getElementById("pw-cur").value="";
+            document.getElementById("pw-new").value="";
+            toast("Password changed");
+          }catch(e){
+            if(msg) msg.textContent="Failed: "+e.message;
+            toast("Password change failed: "+e.message);
+          }finally{ pwb.disabled=false; }
+        });
+        const exb=document.getElementById("export-btn");
+        if(exb) exb.addEventListener("click", async ()=>{
+          try{
+            const r=await fetch("/api/me/export",{headers:authHeaders({})});
+            if(!r.ok) throw new Error("export failed ("+r.status+")");
+            const blob=await r.blob();
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement("a");
+            a.href=url; a.download="dsa-export.json"; a.click();
+            setTimeout(()=>URL.revokeObjectURL(url), 5000);
+            toast("Export downloaded");
+          }catch(e){ toast("Export failed: "+e.message); }
+        });
+        const delb=document.getElementById("delete-acct-btn");
+        if(delb) delb.addEventListener("click", async ()=>{
+          const pw=prompt("Type your password to PERMANENTLY delete your account, submissions, saves and bookmarks. Questions you added stay (anonymized).");
+          if(pw===null) return;
+          if(!pw){ toast("Password required"); return; }
+          if(!confirm("Last chance — delete everything?")) return;
+          try{
+            const r=await fetch("/api/me",{method:"DELETE",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({password:pw})});
+            const d=await r.json().catch(()=>({}));
+            if(!r.ok) throw new Error(d.error||"delete failed");
+            clearAuth();
+            toast("Account deleted");
+            setTimeout(()=>{ location.href="register.html"; }, 800);
+          }catch(e){ toast("Delete failed: "+e.message); }
+        });
         const eb=document.getElementById("profile-edit-btn");
         if(eb) eb.addEventListener("click",()=>{
           const f=document.getElementById("profile-form");

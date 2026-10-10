@@ -85,5 +85,39 @@ async function getPublicProfile(id) {
     createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
   };
 }
+async function updatePassword(id, hash) {
+  if (!id || !hash) throw new Error('Missing id/hash');
+  const [res] = await getPool().query(`UPDATE users SET password_hash=? WHERE id=?`, [hash, id]);
+  return res.affectedRows > 0;
+}
+async function deleteUser(id) {
+  if (!id) throw new Error('Missing id');
+  // FKs cascade: code_saves, submissions, manual_solved, bookmarks;
+  // questions.addedBy goes SET NULL (content preserved).
+  const [res] = await getPool().query(`DELETE FROM users WHERE id=?`, [id]);
+  return res.affectedRows > 0;
+}
+async function exportUserData(id) {
+  const pool = getPool();
+  const user = await findUserById(id);
+  if (!user) return null;
+  const [[{ subTotal }]] = await pool.query(`SELECT COUNT(*) AS subTotal FROM submissions WHERE userId=?`, [id]);
+  const [code] = await pool.query(`SELECT questionId, language, code, updatedAt FROM code_saves WHERE userId=? ORDER BY updatedAt DESC`, [id]);
+  const [subs] = await pool.query(
+    `SELECT id, questionId, title, language, mode, code, passed, total, avgTimeMs, maxTimeMs, maxMemKb, complexityTime, complexitySpace, createdAt
+     FROM submissions WHERE userId=? ORDER BY createdAt DESC LIMIT 500`, [id]);
+  const [manual] = await pool.query(`SELECT questionId, createdAt FROM manual_solved WHERE userId=?`, [id]);
+  const [marks] = await pool.query(`SELECT questionId, createdAt FROM bookmarks WHERE userId=?`, [id]);
+  return {
+    exportedAt: new Date().toISOString(),
+    user: publicUser(user),
+    codeSaves: code.map((r) => ({ ...r, updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null })),
+    submissions: subs.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })),
+    submissionTotal: Number(subTotal) || 0,
+    submissionTruncated: Number(subTotal) > subs.length,
+    manualSolved: manual.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })),
+    bookmarks: marks.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })),
+  };
+}
 
-module.exports = { createUser, findUserByUsername, findUserById, findUserByEmail, publicUser, listUsers, setUserRole, updateProfile, getPublicProfile };
+module.exports = { createUser, findUserByUsername, findUserById, findUserByEmail, publicUser, listUsers, setUserRole, updateProfile, getPublicProfile, updatePassword, deleteUser, exportUserData };
