@@ -86,8 +86,8 @@
       const offset = c * (1 - pct/100);
       return `<div class="ring">
         <svg width="140" height="140" viewBox="0 0 140 140">
-          <circle cx="70" cy="70" r="${r}" fill="none" stroke="#1e222c" stroke-width="12"/>
-          <circle cx="70" cy="70" r="${r}" fill="none" stroke="#ffa116" stroke-width="12" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
+          <circle cx="70" cy="70" r="${r}" fill="none" stroke="var(--panel2)" stroke-width="12"/>
+          <circle cx="70" cy="70" r="${r}" fill="none" stroke="var(--accent)" stroke-width="12" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
         </svg>
         <div class="ring-center"><span class="big">${solved}/${total}</span><span class="small">${pct}% solved</span></div>
       </div>`;

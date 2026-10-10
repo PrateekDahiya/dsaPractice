@@ -1,12 +1,12 @@
 /* components.css — split from style.css. problem content, results console, history, verdict pills, performance. Load order: base, layout, editor, components, pages, responsive. */
 .problem-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
 .problem-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
-.problem-statement { line-height: 1.6; color: #d7dae0; font-size: 14px; margin-bottom: 16px; }
+.problem-statement { line-height: 1.6; color: var(--text-dim); font-size: 14px; margin-bottom: 16px; }
 .problem-statement code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 13px; }
 .problem-statement ul, .problem-statement ol { margin-left: 18px; margin-top: 6px; }
 .constraints, .examples { margin-bottom: 16px; }
 .constraints h3, .examples h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-.constraints ul { list-style: disc; margin-left: 18px; color: #c9cdd6; font-size: 13px; font-family: var(--mono); }
+.constraints ul { list-style: disc; margin-left: 18px; color: var(--text-dim); font-size: 13px; font-family: var(--mono); }
 .example-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 13px; }
 .example-card .ex-row { display: flex; gap: 8px; margin-bottom: 4px; }
 .example-card .ex-label { color: var(--muted); min-width: 70px; font-weight: 600; }
@@ -35,22 +35,22 @@
   cursor: pointer;
   user-select: none;
 }
-.test-case-header:hover { background: #2a2f3a; }
+.test-case-header:hover { background: var(--border); }
 .test-label { font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.pass { background: var(--green); }
 .dot.fail { background: var(--red); }
-.test-vis { font-size: 11px; padding: 2px 6px; border-radius: 999px; background: #2a2f3a; color: var(--muted); }
+.test-vis { font-size: 11px; padding: 2px 6px; border-radius: 999px; background: var(--border); color: var(--muted); }
 .test-body { padding: 10px; border-top: 1px solid var(--border); font-size: 13px; display: none; }
 .test-case.open .test-body { display: block; }
 .kv { display: grid; grid-template-columns: 90px 1fr; gap: 8px; margin-bottom: 6px; }
 .kv-label { color: var(--muted); font-weight: 600; }
-.kv-value pre { background: #0f1117; padding: 6px 8px; border-radius: 6px; font-family: var(--mono); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+.kv-value pre { background: var(--code); padding: 6px 8px; border-radius: 6px; font-family: var(--mono); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
 .kv-value.error pre { color: #ff8a9a; }
 
 .history-list { display: flex; flex-direction: column; gap: 8px; }
 .history-item { padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); cursor: pointer; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
-.history-item:hover { border-color: #3a4050; }
+.history-item:hover { border-color: var(--border-hover); }
 .history-item.active { border-color: var(--accent); }
 .hist-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .hist-q { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
@@ -61,7 +61,7 @@
 .hist-actions { display: flex; gap: 6px; margin-top: 4px; }
 .hist-actions button { padding: 3px 8px; font-size: 11px; }
 .history-detail { margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); font-size: 12px; color: var(--muted); }
-.history-detail pre { background: #0f1117; padding: 8px; border-radius: 6px; font-family: var(--mono); overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--text); margin-top: 6px; }
+.history-detail pre { background: var(--code); padding: 8px; border-radius: 6px; font-family: var(--mono); overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--text); margin-top: 6px; }
 .empty-hist { padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
 /* LeetCode-style verdict + console (submit result left tab, run console right) */
 .verdict-accepted{ color:var(--green); font-weight:800; font-size:20px; }
@@ -87,7 +87,7 @@
 .lc-param-name{ color:var(--muted); font-size:12px; display:block; margin-bottom:4px; }
 .lc-param-val{ margin:0; font-size:15px; font-weight:700; }
 .lc-code-head{ color:var(--muted); font-size:12px; font-weight:600; margin:14px 0 6px; }
-.lc-code{ background:#0f1117; border:1px solid var(--border); border-radius:8px; padding:12px; font-family:var(--mono); font-size:12.5px; line-height:1.6; overflow:auto; max-height:320px; white-space:pre; }
+.lc-code{ background:var(--code); border:1px solid var(--border); border-radius:8px; padding:12px; font-family:var(--mono); font-size:12.5px; line-height:1.6; overflow:auto; max-height:320px; white-space:pre; }
 .console-head{ display:flex; align-items:center; gap:12px; margin-bottom:10px; }
 .console-head .verdict-accepted, .console-head .verdict-wrong, .console-head .verdict-error{ font-size:17px; }
 .run-meta{ color:var(--muted); font-size:13px; }
@@ -104,7 +104,7 @@
 .perf-sec-title:first-of-type{ margin-top:0; }
 .perf-verdict{ font-size:17px; }
 .perf-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px; margin-bottom:12px; }
-.perf-tile{ background:#0f1117; border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+.perf-tile{ background:var(--code); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
 .perf-bar-row{ display:flex; align-items:center; gap:10px; font-size:12px; padding:4px 0; }
 .perf-bar-row .diff-bar{ flex:1; }
 .perf-bar-label{ min-width:96px; color:var(--muted); }
