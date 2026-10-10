@@ -81,8 +81,9 @@ setInterval(() => {
   } catch {}
 }, 60000).unref();
 // Per-question detail cache (avoids re-read + re-parse of all files per execute).
+// TTL is generous (questions change rarely; persistQuestion invalidates on write).
 const questionCache = new Map(); // id -> { q, ts }
-const QUESTION_CACHE_TTL_MS = 30 * 1000;
+const QUESTION_CACHE_TTL_MS = 5 * 60 * 1000;
 const QUESTION_CACHE_MAX = 100;
 function questionCacheGet(id) {
   const e = questionCache.get(id);
