@@ -759,9 +759,9 @@ function renderResults(payload) {
           <span class="test-vis">${r.hidden ? 'hidden' : 'visible'}${r.timeMs!=null?` · ${r.timeMs}ms`:''}${fmtMem(r.memKb)}</span>
         </div>
         <div class="test-body">
-          <div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(JSON.stringify(r.input, null, 2))}</pre></span></div>
-          <div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(JSON.stringify(r.expected, null, 2))}</pre></span></div>
-          <div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error ? r.error : JSON.stringify(r.actual, null, 2))}</pre></span></div>
+          <div class="kv"><span class="kv-label">Input</span><span class="kv-value"><pre>${esc(fmtJson(r.input))}</pre></span></div>
+          <div class="kv"><span class="kv-label">Expected</span><span class="kv-value"><pre>${esc(fmtJson(r.expected))}</pre></span></div>
+          <div class="kv"><span class="kv-label">Got</span><span class="kv-value ${r.error?'error':''}"><pre>${esc(r.error ? r.error : fmtJson(r.actual))}</pre></span></div>
           ${r.error?`<div class="kv"><span class="kv-label">Error</span><span class="kv-value error"><pre>${esc(r.error)}</pre></span></div>`:""}
         </div>
       </div>
