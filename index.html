@@ -114,6 +114,7 @@
           <div class="editor-actions">
             <button id="run-btn" class="btn secondary">Run</button>
             <button id="submit-btn" class="btn primary">Submit</button>
+            <button id="custom-btn" class="btn ghost" title="Run with your own input">Custom</button>
           </div>
         </div>
         <div id="editor-top" class="editor-top">
@@ -126,6 +127,14 @@
             <span id="last-run-meta"></span>
           </div>
           <div id="test-results" class="test-results"></div>
+          <div id="custom-panel" class="hidden" style="border-top:1px solid var(--border);padding:10px 12px;background:var(--panel)">
+            <div style="font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px">Custom input (JSON object keyed by param name) — runs <em>only</em> this input, output is not scored</div>
+            <textarea id="custom-input" spellcheck="false" rows="3" style="width:100%;background:var(--code);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:13px;resize:vertical" placeholder='{"nums":[1,2,3],"target":3}'></textarea>
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+              <button id="run-custom-btn" class="btn secondary">Run Custom</button>
+              <span style="font-size:11px;color:var(--muted)">Enter = run</span>
+            </div>
+          </div>
         </div>
         </div>
         <div id="submission-view" class="submission-view hidden" style="display:flex;flex-direction:column;flex:1;min-height:0">

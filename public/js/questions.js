@@ -211,6 +211,8 @@ async function loadQuestion(id) {
     currentQuestion = q;
     syncQuestionCtx();
     resetResultTab();
+    const customTa = document.getElementById("custom-input");
+    if (customTa) customTa.value = ""; // stale params from another question would 400
     renderProblem();
     // Starter code + history are independent fetches: run in parallel instead
     // of sequentially (each is a 0.3-1s DB roundtrip on hosted deployments).

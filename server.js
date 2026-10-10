@@ -933,6 +933,11 @@ async function executeQuestion(question, code, language) {
   const testCases = question._testCasesForMode;
   const results = [];
   let passed = 0;
+  // Custom-input rows (expectedOutput null) are output-only: shown but never
+  // scored, so totals count stored cases only.
+  const isCustom = (tc) => tc && tc.expectedOutput === null;
+  const storedTotal = testCases.filter((tc) => !isCustom(tc)).length;
+  const score = (tc, actual) => (isCustom(tc) ? null : deepEqual(actual, tc.expectedOutput, question.id));
   // batch for cpp/python (compile once), js keep per-case (fast vm)
   if (language === "cpp" && testCases.length > 1) {
     const startAll = Date.now();
@@ -941,15 +946,15 @@ async function executeQuestion(question, code, language) {
       for (let i=0;i<testCases.length;i++) {
         const tc=testCases[i];
         const actual=actuals[i];
-        const ok=deepEqual(actual, tc.expectedOutput, question.id);
-        if(ok) passed++;
+        const ok=score(tc, actual);
+        if(ok===true) passed++;
         results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length), memKb});
       }
     } catch (e) {
       const msg=e.message;
-      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed: isCustom(tc) ? null : false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
     }
-    return { total: testCases.length, passed, results };
+    return { total: storedTotal, passed, results };
   }
   if (language === "python" && testCases.length > 1) {
     const startAll = Date.now();
@@ -958,15 +963,15 @@ async function executeQuestion(question, code, language) {
       for (let i=0;i<testCases.length;i++) {
         const tc=testCases[i];
         const actual=actuals[i];
-        const ok=deepEqual(actual, tc.expectedOutput, question.id);
-        if(ok) passed++;
+        const ok=score(tc, actual);
+        if(ok===true) passed++;
         results.push({testCaseId: tc.id, passed: ok, input: tc.input, expected: tc.expectedOutput, actual, error: null, hidden: !!tc._hidden, timeMs: Math.round((Date.now()-startAll)/testCases.length), memKb});
       }
     } catch (e) {
       const msg=e.message;
-      for (const tc of testCases) results.push({testCaseId: tc.id, passed:false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
+      for (const tc of testCases) results.push({testCaseId: tc.id, passed: isCustom(tc) ? null : false, input: tc.input, expected: tc.expectedOutput, actual:null, error: msg, hidden: !!tc._hidden, timeMs: 0, memKb: null});
     }
-    return { total: testCases.length, passed, results };
+    return { total: storedTotal, passed, results };
   }
   for (const tc of testCases) {
     const start = Date.now();
@@ -984,12 +989,13 @@ async function executeQuestion(question, code, language) {
       } else {
         throw new Error(`Unsupported language: ${language}`);
       }
-      ok = deepEqual(actual, tc.expectedOutput, question.id);
+      ok = score(tc, actual);
     } catch (e) {
       error = e.message;
       if (String(e.message).includes("Script execution timed out")) error = "Time Limit Exceeded (JS >2s)";
     }
-    if (ok) passed++;
+    if (ok === true) passed++;
+    if (error && isCustom(tc)) ok = null;
     results.push({
       testCaseId: tc.id,
       passed: ok,
@@ -1002,7 +1008,7 @@ async function executeQuestion(question, code, language) {
       memKb
     });
   }
-  return { total: testCases.length, passed, results };
+  return { total: storedTotal, passed, results };
 }
 
 // ---------- http helpers ----------
@@ -1807,9 +1813,11 @@ const server = http.createServer(async (req, res) => {
       let gateKind = null, held = false;
       try {
         if (bodyTooLarge) { res.writeHead(413, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Request body too large"})); }
-        const { questionId, code, language, mode } = JSON.parse(body || "{}");
+        const parsedBody = JSON.parse(body || "{}");
+        const { questionId, code, language, mode } = parsedBody;
         if (!questionId || !code || !language || !mode) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"Missing fields"})); }
         if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"bad request"})); }
+        if (parsedBody.customInput !== undefined) { res.writeHead(400, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"customInput is only supported on POST /api/execute"})); }
         if (language === "cpp" && DISABLE_CPP) { res.writeHead(503, {"Content-Type":"application/json"}); return res.end(JSON.stringify({error:"C++ execution disabled on this instance (low memory). Use JavaScript or Python."})); }
         gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
         if (gateKind && !execTryAcquire(gateKind)) {
@@ -1993,9 +2001,11 @@ const server = http.createServer(async (req, res) => {
       let gateKind = null, held = false;
       try {
         if (bodyTooLarge) return sendJson(res, { error: "Request body too large" }, 413);
-        const { questionId, code, language, mode, index } = JSON.parse(body || "{}");
+        const parsedCase = JSON.parse(body || "{}");
+        const { questionId, code, language, mode, index } = parsedCase;
         if (!questionId || !code || !language || !mode || index===undefined) return sendJson(res, { error: "Missing fields: questionId, code, language, mode, index" }, 400);
         if (!["run","submit"].includes(mode) || !["javascript","python","cpp"].includes(language) || code.length>50000) return sendJson(res, { error: "bad request" }, 400);
+        if (parsedCase.customInput !== undefined) return sendJson(res, { error: "customInput is only supported on POST /api/execute" }, 400);
         if (language === "cpp" && DISABLE_CPP) return sendJson(res, { error: "C++ execution disabled on this instance (low memory). Use JavaScript or Python." }, 503);
         gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
         if (gateKind && !execTryAcquire(gateKind)) {
@@ -2157,11 +2167,18 @@ const server = http.createServer(async (req, res) => {
     req.on("end", async () => {
       try {
         if (bodyTooLarge) return sendJson(res, { error: "Request body too large" }, 413);
-        const { questionId, code, language, mode } = JSON.parse(body || "{}");
+        const { questionId, code, language, mode, customInput, customOnly } = JSON.parse(body || "{}");
         if (!questionId || !code || !language || !mode) return sendJson(res, { error: "Missing fields: questionId, code, language, mode" }, 400);
         if (!["run","submit"].includes(mode)) return sendJson(res, { error: "mode must be run or submit" }, 400);
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "language must be javascript, python or cpp" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
+        if (customInput !== undefined && mode !== "run") return sendJson(res, { error: "customInput is only allowed with mode=run" }, 400);
+        if (customInput !== undefined && (typeof customInput !== "object" || customInput === null || Array.isArray(customInput))) {
+          return sendJson(res, { error: "customInput must be an object keyed by param name" }, 400);
+        }
+        if (customInput !== undefined && JSON.stringify(customInput).length > 2000) {
+          return sendJson(res, { error: "customInput too large (max 2000 chars JSON)" }, 400);
+        }
         if (language === "cpp" && DISABLE_CPP) return sendJson(res, { error: "C++ execution disabled on this instance (low memory). Use JavaScript or Python." }, 503);
         // Global execution gate: bounds concurrent g++/python so free-tier RAM can't OOM.
         const gateKind = language === "cpp" ? "cpp" : (language === "python" ? "python" : null);
@@ -2178,7 +2195,14 @@ const server = http.createServer(async (req, res) => {
           if (!q) return sendJson(res, { error: "Question not found" }, 404);
           const visible = q.visibleTestCases.map(tc => ({ ...tc, _hidden: false }));
           const hidden = (q.hiddenTestCases||[]).map(tc => ({ ...tc, _hidden: true }));
-          q._testCasesForMode = mode === "run" ? visible : [...visible, ...hidden];
+          if (customInput !== undefined) {
+            const bad = validateTestCaseInputs([{ id: "custom", input: customInput }], q.params);
+            if (bad) return sendJson(res, { error: "customInput: " + bad }, 400);
+            const custom = { id: "custom", input: customInput, expectedOutput: null, _hidden: false };
+            q._testCasesForMode = customOnly ? [custom] : [...visible, custom];
+          } else {
+            q._testCasesForMode = mode === "run" ? visible : [...visible, ...hidden];
+          }
           const result = await executeQuestion(q, code, language);
           return sendJson(res, { mode, ...result });
         } finally {
