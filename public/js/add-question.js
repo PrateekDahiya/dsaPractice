@@ -171,28 +171,40 @@ if(validateBtn) validateBtn.addEventListener("click", () => {
 });
 
 
+function isFormTabActive(){
+  try { return !!document.querySelector('.tab-btn[data-tab="form"]')?.classList.contains("active"); }
+  catch { return false; }
+}
+// Read guided-form fields and overlay them onto a base question object.
+// The form doesn't cover every field (C++ starter, complexity, generatedBy…),
+// so merging (never fresh-building) is what keeps edits lossless.
+function readFormInto(base){
+  const q = { ...(base || {}) };
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  q.id = val("f-id").trim();
+  q.title = val("f-title").trim();
+  q.difficulty = val("f-diff");
+  q.tags = val("f-tags").split(",").map(s=>s.trim()).filter(Boolean);
+  q.problemStatement = val("f-statement").trim();
+  q.constraints = val("f-constraints").split("\n").map(s=>s.trim()).filter(Boolean);
+  q.examples = JSON.parse(val("f-examples").trim() || "[]");
+  q.functionName = val("f-fn").trim();
+  q.pythonFunctionName = val("f-pyfn").trim() || undefined;
+  q.params = val("f-params").split(",").map(s=>s.trim()).filter(Boolean);
+  q.starterCode = { ...((base && base.starterCode) || {}) };
+  q.starterCode.javascript = val("f-starter-js");
+  if (val("f-starter-py")) q.starterCode.python = val("f-starter-py");
+  else delete q.starterCode.python;
+  q.visibleTestCases = JSON.parse(val("f-visible").trim() || "[]");
+  q.hiddenTestCases = JSON.parse(val("f-hidden").trim() || "[]");
+  if (!q.pythonFunctionName) delete q.pythonFunctionName;
+  return q;
+}
 document.getElementById("form-to-json-btn")?.addEventListener("click", () => {
   try {
-    const q = {
-      id: $("#f-id").value.trim(),
-      title: $("#f-title").value.trim(),
-      difficulty: $("#f-diff").value,
-      tags: $("#f-tags").value.split(",").map(s=>s.trim()).filter(Boolean),
-      problemStatement: $("#f-statement").value.trim(),
-      constraints: $("#f-constraints").value.split("\n").map(s=>s.trim()).filter(Boolean),
-      examples: JSON.parse($("#f-examples").value.trim() || "[]"),
-      functionName: $("#f-fn").value.trim(),
-      pythonFunctionName: $("#f-pyfn").value.trim() || undefined,
-      params: $("#f-params").value.split(",").map(s=>s.trim()).filter(Boolean),
-      starterCode: {
-        javascript: $("#f-starter-js").value,
-        python: $("#f-starter-py").value || undefined
-      },
-      visibleTestCases: JSON.parse($("#f-visible").value.trim() || "[]"),
-      hiddenTestCases: JSON.parse($("#f-hidden").value.trim() || "[]")
-    };
-    if (!q.pythonFunctionName) delete q.pythonFunctionName;
-    if (!q.starterCode.python) delete q.starterCode.python;
+    let base = {};
+    try { base = JSON.parse(jsonTextarea.value.trim() || "{}"); } catch { base = {}; }
+    const q = readFormInto(base);
     const errs = validateQuestion(q);
     if (errs.length) throw new Error(errs.join("; "));
     jsonTextarea.value = JSON.stringify(q, null, 2);
@@ -215,6 +227,24 @@ document.getElementById("form-to-json-btn")?.addEventListener("click", () => {
 let editingId = null;
 
 if(saveBtn) saveBtn.addEventListener("click", async () => {
+  // Guided-form edits must flow into the save: if the form tab is active,
+  // merge it over the Raw JSON first (preserves C++/complexity fields the
+  // form doesn't cover). Otherwise the form content is silently ignored.
+  if (isFormTabActive()) {
+    try {
+      let base = {};
+      try { base = JSON.parse(jsonTextarea.value.trim() || "{}"); } catch { base = {}; }
+      const merged = readFormInto(base);
+      const formErrs = validateQuestion(merged);
+      if (formErrs.length) throw new Error(formErrs.join("; "));
+      jsonTextarea.value = JSON.stringify(merged, null, 2);
+    } catch (e) {
+      jsonError.textContent = "Form has errors: " + e.message;
+      jsonError.classList.remove("hidden", "ok");
+      toast("Fix the guided form first (see Raw JSON for details)");
+      return;
+    }
+  }
   let q;
   try { q = JSON.parse(jsonTextarea.value); } catch (e) {
     jsonError.textContent = "Invalid JSON: " + e.message; jsonError.classList.remove("hidden","ok"); return;
