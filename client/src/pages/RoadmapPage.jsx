@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Topbar from "../components/Topbar.jsx";
 import { apiFetch, apiJson } from "../api/client.js";
@@ -27,6 +27,20 @@ const STEPS = [
   { slug: "maths", title: "Maths", blurb: "Number theory for interviews.", seedIds: ["find-missing-number"], genDifficulty: "Easy", planned: ["Count Primes", "Pow(x,n)", "Excel Column Number", "Palindrome Number"] },
 ];
 
+// Remember which planned item each AI-generated question was created for:
+// the model must avoid existing titles, so a generated title often does NOT
+// fuzzy-match the planned name — without this map the item would look
+// "missing" forever after a successful generate.
+const GEN_KEY = "dsa_roadmap_generated_v1";
+const genKeyFor = (slug, name) => `${slug}:${name}`;
+function loadGenMap() {
+  try {
+    return { ...(JSON.parse(localStorage.getItem(GEN_KEY) || "{}") || {}) };
+  } catch {
+    return {};
+  }
+}
+
 function norm(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -38,8 +52,6 @@ function nameMatches(q, name) {
   return n === t || (n.length >= 6 && (t.includes(n) || n.includes(t)));
 }
 
-// Mirrors roadmap.html: 20 Striver A2Z steps, matched vs missing questions,
-// per-step AI generation.
 export default function RoadmapPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -53,6 +65,17 @@ export default function RoadmapPage() {
   const [notice, setNotice] = useState("");
   const [generating, setGenerating] = useState("");
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const [filter, setFilter] = useState("all");
+  const [genMap, setGenMap] = useState(loadGenMap);
+  const autoCollapsed = useRef(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GEN_KEY, JSON.stringify(genMap));
+    } catch {
+      // private mode — mapping just won't survive reloads
+    }
+  }, [genMap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,18 +155,55 @@ export default function RoadmapPage() {
           if (hit) seen.add(q.id);
           return hit;
         });
-        const missing = (step.planned || []).filter((n) => !matched.some((q) => nameMatches(q, n)));
-        return { step, matched, missing };
+        const byId = new Map(matched.map((q) => [q.id, q]));
+        // Planned names with no title match: filled if we generated a question
+        // for exactly that item and it is still in this step (self-heals when
+        // the generated question is deleted).
+        const filled = [];
+        const missing = (step.planned || []).filter((n) => {
+          if (matched.some((q) => nameMatches(q, n))) return false;
+          const gid = genMap[genKeyFor(step.slug, n)];
+          const gq = gid && byId.get(gid);
+          if (gq) {
+            filled.push({ name: n, q: gq });
+            return false;
+          }
+          return true;
+        });
+        const done = matched.filter((q) => solvedSet.has(q.id)).length;
+        const status =
+          matched.length > 0 && missing.length === 0 && done === matched.length
+            ? "done"
+            : matched.length > 0 || filled.length > 0
+              ? "progress"
+              : "todo";
+        return { step, matched, missing, filled, done, status };
       }),
-    [questions]
+    [questions, solvedSet, genMap]
   );
+
+  // Once, after the first load: tuck completed steps away.
+  useEffect(() => {
+    if (!loading && !autoCollapsed.current) {
+      autoCollapsed.current = true;
+      setCollapsed(new Set(perStep.filter((s) => s.status === "done").map((s) => s.step.slug)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const allIds = useMemo(() => {
     const s = new Set();
     perStep.forEach(({ matched }) => matched.forEach((q) => s.add(q.id)));
     return s;
   }, [perStep]);
-  const solvedCount = [...allIds].filter((id) => solvedSet.has(id)).length;
+  const solvedIds = useMemo(() => [...allIds].filter((id) => solvedSet.has(id)), [allIds, solvedSet]);
+  const attemptedIds = useMemo(
+    () => [...allIds].filter((id) => !solvedSet.has(id) && attemptedSet.has(id)),
+    [allIds, solvedSet, attemptedSet]
+  );
+  const overallPct = allIds.size ? Math.round((solvedIds.length / allIds.size) * 100) : 0;
+  const visibleSteps = perStep.filter(({ status }) => filter === "all" || status === filter);
+  const doneSteps = perStep.filter((s) => s.status === "done").length;
 
   async function generateOne(topic, difficulty, tag, key) {
     if (!user) {
@@ -159,6 +219,7 @@ export default function RoadmapPage() {
         body: JSON.stringify({ topic, difficulty, tags: [tag] }),
       });
       setNotice(`Added: ${d.title}${d.attempts > 1 ? ` (took ${d.attempts} tries)` : ""}`);
+      if (d && d.id) setGenMap((prev) => ({ ...prev, [key]: d.id }));
       const qs = await (await apiFetch("/api/questions")).json();
       setQuestions(qs);
     } catch (e) {
@@ -178,131 +239,156 @@ export default function RoadmapPage() {
   }
 
   function qRow(q) {
-    const mark = solvedSet.has(q.id) ? (
-      <span style={{ color: "#00b8a3", fontWeight: 700 }} title="Solved">✓</span>
-    ) : attemptedSet.has(q.id) ? (
-      <span style={{ color: "#ffa116", fontWeight: 700 }} title="Attempted">●</span>
-    ) : (
-      <span style={{ color: "var(--muted)" }} title="Todo">·</span>
-    );
+    const cls = solvedSet.has(q.id) ? "solved" : attemptedSet.has(q.id) ? "attempted" : "todo";
+    const mark = cls === "solved" ? "✓" : cls === "attempted" ? "●" : "·";
+    const markTitle = cls === "solved" ? "Solved" : cls === "attempted" ? "Attempted" : "Todo";
     const ai = (q.tags || []).includes("AI") ? (
-      <span style={{ fontSize: 10, color: "var(--muted)" }} title="AI generated">AI</span>
+      <span className="rm-ai" title="AI generated">AI</span>
     ) : null;
     const topics = (q.tags || []).filter((t) => t !== "AI" && !t.startsWith("roadmap:"));
     const s = statsMap[q.id] || { attempted: 0, submissions: 0, solved: 0 };
     const rate = s.attempted ? Math.round((s.solved / s.attempted) * 100) + "%" : "–";
     return (
-      <div
-        key={q.id}
-        style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 13, flexWrap: "wrap" }}
-      >
-        {mark}
-        <Link to={`/workspace/${q.id}`} style={{ fontWeight: 600, color: "var(--text)", textDecoration: "none" }}>
+      <div key={q.id} className={`rm-row ${cls}`}>
+        <span className="rm-mark" title={markTitle}>{mark}</span>
+        <Link to={`/workspace/${q.id}`} className="rm-qtitle">
           {q.title}
         </Link>
         {ai}
-        <span className={`badge ${q.difficulty}`} style={{ fontSize: 11 }}>{q.difficulty}</span>
-        <span style={{ color: "var(--muted)", fontSize: 12 }}>{topics.join(" · ") || "general"}</span>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }} title={`${s.submissions} total tries`}>
+        <span className={`badge ${q.difficulty}`}>{q.difficulty}</span>
+        <span className="rm-topics">{topics.join(" · ") || "general"}</span>
+        <span className="rm-stats" title={`${s.submissions} total tries`}>
           {s.attempted} attempted · {s.solved} solved · {rate}
         </span>
       </div>
     );
   }
 
+  const statusIcon = { done: "✓", progress: "◐", todo: "○" };
+
   return (
     <div>
       <Topbar />
       <div className="lb-wrap" style={{ maxWidth: 1100 }}>
         <h1 style={{ fontSize: 22, marginBottom: 6 }}>Striver A2Z Roadmap</h1>
-        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 6 }}>
+        <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
           20 steps, basics to advanced — your questions slotted in, gaps fillable with AI.
         </p>
-        <div id="overall" style={{ background: "var(--panel2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13 }}>
+        <div className="rm-hero">
           {loading ? (
             "Loading..."
           ) : (
             <>
-              <strong>{solvedCount} / {allIds.size}</strong> roadmap questions solved
-              {!user && (
-                <>
-                  {" — "}<Link to="/login" className="ghost-link">login</Link> to track progress
-                </>
-              )}
+              <div className="rm-hero-num">
+                <strong>{solvedIds.length} / {allIds.size}</strong>
+                <span>
+                  roadmap questions solved
+                  {!user && (
+                    <>
+                      {" — "}<Link to="/login" className="ghost-link">login</Link> to track progress
+                    </>
+                  )}
+                </span>
+              </div>
+              <div className="diff-bar rm-hero-bar">
+                <span style={{ width: `${overallPct}%` }}></span>
+              </div>
+              <div className="rm-chips">
+                <span className="rm-chip">✓ {solvedIds.length} solved</span>
+                <span className="rm-chip">◐ {attemptedIds.length} attempted</span>
+                <span className="rm-chip">○ {allIds.size - solvedIds.length - attemptedIds.length} todo</span>
+                <span className="rm-chip">{doneSteps} / {perStep.length} steps complete</span>
+              </div>
             </>
           )}
         </div>
         {!aiReady && !loading && (
-          <div style={{ background: "var(--panel2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "var(--muted)" }}>
+          <div className="rm-hero" style={{ color: "var(--muted)", fontSize: 13 }}>
             AI generation is not configured on this server (GROQ_API_KEY missing) — Generate buttons are disabled.
           </div>
         )}
-        {notice ? (
-          <div style={{ background: "var(--panel2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13 }}>{notice}</div>
-        ) : null}
+        {notice ? <div className="rm-hero" style={{ fontSize: 13 }}>{notice}</div> : null}
         {loading ? (
           <div style={{ color: "var(--muted)", padding: 20, textAlign: "center" }}>Loading...</div>
         ) : error ? (
           <div style={{ color: "var(--muted)", padding: 20, textAlign: "center" }}>Error: {error}</div>
         ) : (
-          <div id="steps">
-            {perStep.map(({ step: s, matched: qs, missing }, i) => {
-              const done = qs.filter((q) => solvedSet.has(q.id)).length;
-              const pct = qs.length ? Math.round((done / qs.length) * 100) : 0;
-              const isCollapsed = collapsed.has(s.slug);
-              return (
-                <div key={s.slug} style={{ background: "var(--panel2)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
-                  <div
-                    style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", cursor: "pointer" }}
-                    onClick={() => toggleCollapse(s.slug)}
-                  >
-                    <span style={{ color: "var(--muted)", fontSize: 12 }}>Step {i + 1}</span>
-                    <strong style={{ fontSize: 15 }}>{s.title}</strong>
-                    <span style={{ color: "var(--muted)", fontSize: 12, marginLeft: "auto" }}>
-                      {done}/{qs.length} solved · {missing.length} missing {isCollapsed ? "▸" : "▾"}
-                    </span>
-                  </div>
-                  {!isCollapsed && (
-                    <>
-                      <div style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 8px" }}>{s.blurb}</div>
-                      <div className="diff-bar" style={{ marginBottom: 10 }}>
+          <>
+            <div className="filter-tabs">
+              {[
+                ["all", `All (${perStep.length})`],
+                ["progress", `In progress (${perStep.filter((s) => s.status === "progress").length})`],
+                ["done", `Complete (${doneSteps})`],
+                ["todo", `Not started (${perStep.filter((s) => s.status === "todo").length})`],
+              ].map(([v, label]) => (
+                <button key={v} className={filter === v ? "active" : ""} onClick={() => setFilter(v)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div id="steps">
+              {visibleSteps.map(({ step: s, matched: qs, missing, filled, done, status }, i) => {
+                const pct = qs.length ? Math.round((done / qs.length) * 100) : 0;
+                const isCollapsed = collapsed.has(s.slug);
+                return (
+                  <div key={s.slug} className={`rm-step ${status === "done" ? "done" : status === "progress" ? "active" : ""}${isCollapsed ? " collapsed" : ""}`}>
+                    <button className="rm-head" onClick={() => toggleCollapse(s.slug)} aria-expanded={!isCollapsed}>
+                      <span className="rm-status">{statusIcon[status]}</span>
+                      <span className="rm-stepnum">Step {STEPS.indexOf(s) + 1}</span>
+                      <span className="rm-title">{s.title}</span>
+                      <span className="rm-meta">
+                        {done}/{qs.length} solved · {missing.length} missing
+                      </span>
+                      <span className="rm-chev">▾</span>
+                    </button>
+                    <div className="rm-step-body">
+                      <p className="rm-blurb">{s.blurb}</p>
+                      <div className="diff-bar easy">
                         <span style={{ width: `${pct}%` }}></span>
                       </div>
-                      <div>{qs.length ? qs.map(qRow) : <span style={{ color: "var(--muted)", fontSize: 12 }}>Nothing here yet.</span>}</div>
-                      <div style={{ marginTop: 8 }}>
-                        {missing.length ? (
-                          missing.map((n) => {
-                            const key = `${s.slug}:${n}`;
-                            return (
-                              <div
-                                key={key}
-                                style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px dashed var(--border)", fontSize: 13, flexWrap: "wrap" }}
+                      <div>{qs.length ? qs.map(qRow) : <div className="rm-empty">Nothing here yet.</div>}</div>
+                      <div>
+                        {filled.map(({ name, q }) => (
+                          <div key={`${s.slug}:${name}`} className="rm-missing">
+                            <span className="rm-name">○ {name}</span>
+                            <Link to={`/workspace/${q.id}`} className="rm-qtitle">{q.title}</Link>
+                            <span className="rm-ai">AI</span>
+                            <span className="rm-plan">generated ✓</span>
+                          </div>
+                        ))}
+                        {missing.map((n) => {
+                          const key = genKeyFor(s.slug, n);
+                          return (
+                            <div key={key} className="rm-missing">
+                              <span className="rm-name">○ {n}</span>
+                              <span className={`badge ${s.genDifficulty}`}>{s.genDifficulty}</span>
+                              <span className="rm-plan">planned · {s.title} · missing</span>
+                              <button
+                                className="btn ghost gen-one"
+                                disabled={!aiReady || generating === key}
+                                title={aiReady ? "" : "AI not configured"}
+                                onClick={() => generateOne(n, s.genDifficulty, `roadmap:${s.slug}`, key)}
                               >
-                                <span style={{ color: "var(--muted)" }}>○ {n}</span>
-                                <span className={`badge ${s.genDifficulty}`} style={{ fontSize: 11 }}>{s.genDifficulty}</span>
-                                <span style={{ fontSize: 11, color: "var(--muted)" }}>planned · {s.title} · missing</span>
-                                <button
-                                  className="btn ghost gen-one"
-                                  style={{ padding: "4px 10px", fontSize: 12, marginLeft: "auto" }}
-                                  disabled={!aiReady || generating === key}
-                                  title={aiReady ? "" : "AI not configured"}
-                                  onClick={() => generateOne(n, s.genDifficulty, `roadmap:${s.slug}`, key)}
-                                >
-                                  {generating === key ? "Generating… (up to ~2 min)" : "✨ Generate"}
-                                </button>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          <div style={{ fontSize: 12, color: "#00b8a3", padding: "6px 0" }}>All planned questions present ✓</div>
+                                {generating === key ? "Generating… (up to ~2 min)" : "✨ Generate"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {!missing.length && !filled.length && (
+                          <div className="rm-complete">All planned questions present ✓</div>
                         )}
                       </div>
-                    </>
-                  )}
+                    </div>
+                  </div>
+                );
+              })}
+              {!visibleSteps.length && (
+                <div className="rm-empty" style={{ textAlign: "center", padding: 24 }}>
+                  No steps in this state yet.
                 </div>
-              );
-            })}
-          </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
