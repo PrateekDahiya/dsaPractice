@@ -6,6 +6,7 @@
   "required": ["id", "title", "difficulty", "problemStatement", "functionName", "params", "starterCode", "visibleTestCases", "hiddenTestCases"],
   "properties": {
     "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Slug, also filename. e.g. two-sum" },
+    "qno": { "type": "integer", "minimum": 1, "description": "Stable question number (auto-assigned server-side if omitted)" },
     "title": { "type": "string" },
     "difficulty": { "type": "string", "enum": ["Easy", "Medium", "Hard"] },
     "timeComplexity": { "type": "string", "description": "Expected optimal time, e.g. O(n)" },

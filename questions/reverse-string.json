@@ -1,5 +1,6 @@
 {
   "id": "reverse-string",
+  "qno": 2,
   "title": "Reverse String",
   "difficulty": "Easy",
   "tags": ["Two Pointers", "String"],

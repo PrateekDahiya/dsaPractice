@@ -1,5 +1,6 @@
 {
   "id": "valid-parentheses",
+  "qno": 3,
   "title": "Valid Parentheses",
   "difficulty": "Easy",
   "tags": ["Stack", "String"],

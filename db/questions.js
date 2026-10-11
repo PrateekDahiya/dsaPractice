@@ -26,10 +26,10 @@ async function migrateFromFiles(questionsDir) {
       const stat = fs.statSync(path.join(questionsDir, file));
       const createdAt = q.createdAt ? new Date(q.createdAt) : new Date(stat.mtimeMs);
       await pool.query(
-        `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,timeComplexity,spaceComplexity,createdAt)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO questions (id,qno,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,timeComplexity,spaceComplexity,createdAt)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE title=VALUES(title), difficulty=VALUES(difficulty)`,
-        [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt]
+        [q.id, Number.isInteger(q.qno) && q.qno > 0 ? q.qno : null, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt]
       );
     } catch (e) { console.warn('migrate skip', file, e.message); }
   }
@@ -40,7 +40,7 @@ async function dbLoadQuestions() {
   try {
     const [rows] = await getPool().query('SELECT q.*, u.username as addedByUsername FROM questions q LEFT JOIN users u ON q.addedBy = u.id ORDER BY q.createdAt DESC');
     return rows.map(r => ({
-      id: r.id, title: r.title, difficulty: r.difficulty,
+      id: r.id, qno: r.qno != null ? Number(r.qno) : null, title: r.title, difficulty: r.difficulty,
       tags: typeof r.tags==='string' ? JSON.parse(r.tags) : r.tags || [],
       problemStatement: r.problemStatement,
       constraints: typeof r.constraints==='string' ? JSON.parse(r.constraints) : r.constraints || [],
@@ -69,7 +69,7 @@ async function dbGetQuestion(id) {
   if (!rows.length) return null;
   const r = rows[0];
   return {
-    id: r.id, title: r.title, difficulty: r.difficulty,
+    id: r.id, qno: r.qno != null ? Number(r.qno) : null, title: r.title, difficulty: r.difficulty,
     tags: typeof r.tags==='string' ? JSON.parse(r.tags) : r.tags || [],
     problemStatement: r.problemStatement,
     constraints: typeof r.constraints==='string' ? JSON.parse(r.constraints) : r.constraints || [],
@@ -91,9 +91,9 @@ async function dbCreateQuestion(q, addedBy=null, addedByUsername=null) {
   const pool = getPool();
   const createdAt = q.createdAt ? new Date(q.createdAt) : new Date();
   await pool.query(
-    `INSERT INTO questions (id,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,timeComplexity,spaceComplexity,createdAt,addedBy,addedByUsername)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [q.id, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt, addedBy, addedByUsername]
+    `INSERT INTO questions (id,qno,title,difficulty,tags,problemStatement,constraints,examples,functionName,pythonFunctionName,cppFunctionName,params,starterCode,visibleTestCases,hiddenTestCases,timeComplexity,spaceComplexity,createdAt,addedBy,addedByUsername)
+     VALUES (?,?,?, ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [q.id, Number.isInteger(q.qno) && q.qno > 0 ? q.qno : null, q.title, q.difficulty, JSON.stringify(q.tags||[]), q.problemStatement, JSON.stringify(q.constraints||[]), JSON.stringify(q.examples||[]), q.functionName, q.pythonFunctionName||null, q.cppFunctionName||null, JSON.stringify(q.params), JSON.stringify(q.starterCode), JSON.stringify(q.visibleTestCases), JSON.stringify(q.hiddenTestCases), q.timeComplexity||null, q.spaceComplexity||null, createdAt, addedBy, addedByUsername]
   );
 }
 async function dbUpdateQuestion(id, q) {

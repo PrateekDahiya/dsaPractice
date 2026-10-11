@@ -131,6 +131,21 @@ async function initDb() {
   try { await pool.query(`ALTER TABLE questions ADD COLUMN spaceComplexity VARCHAR(50) NULL`); } catch {}
   // One-time rename: tag `ai-generated` -> `AI` (exact quoted token; idempotent no-op afterwards).
   try { await pool.query(`UPDATE questions SET tags = REPLACE(tags, '"ai-generated"', '"AI"') WHERE tags LIKE '%ai-generated%'`); } catch (e) { console.warn('tag rename skipped:', e.message); }
+  // Stable numeric identity for display/ordering (slug `id` stays the PRIMARY
+  // KEY so no FK rewrite is needed; qno is UNIQUE + AUTO_INCREMENT).
+  // Idempotent: only NULL rows are numbered, from current max+1.
+  try { await pool.query(`ALTER TABLE questions ADD COLUMN qno INT UNSIGNED NULL`); } catch {}
+  try {
+    const [[{ n }]] = await pool.query(`SELECT COUNT(*) AS n FROM questions WHERE qno IS NULL`);
+    if (Number(n) > 0) {
+      await pool.query(`SET @__qno := (SELECT COALESCE(MAX(qno), 0) FROM questions)`);
+      await pool.query(`UPDATE questions SET qno = (@__qno := @__qno + 1) WHERE qno IS NULL ORDER BY createdAt, id`);
+      console.log(`DB: assigned qno to ${n} questions`);
+    }
+  } catch (e) { console.warn('qno backfill skipped:', e.message); }
+  try { await pool.query(`ALTER TABLE questions MODIFY COLUMN qno INT UNSIGNED NOT NULL AUTO_INCREMENT, ADD UNIQUE KEY uniq_qno (qno)`); } catch (e) {
+    if (!String(e.message || '').toLowerCase().includes('duplicate')) console.warn('qno auto-inc skipped:', e.message);
+  }
   try {
     const { seedMethodDocs } = require('./methods');
     await seedMethodDocs();

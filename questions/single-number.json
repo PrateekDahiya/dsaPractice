@@ -1,5 +1,6 @@
 {
   "id": "single-number",
+  "qno": 10,
   "title": "Find the Element That Appears Once",
   "difficulty": "Easy",
   "tags": [

@@ -28,7 +28,7 @@ const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const QUESTIONS_DIR = path.join(ROOT, "questions");
 let db = null;
-try { db = require("./db"); } catch { db = null; }
+try { db = require("./db/index"); } catch { db = null; }
 let dbReady = false;
 let useDb = !!db;
 let cache = { questions: null, questionsTs: 0, leaderboard: new Map() };
@@ -424,6 +424,11 @@ const MIME = {
   ".json": "application/json",
   ".txt": "text/plain",
   ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
 };
 
 // ---------- question loader ----------
@@ -1529,7 +1534,7 @@ const server = http.createServer(async (req, res) => {
     }
     const qs = await loadQuestions();
     qs.sort((a,b)=> (b._createdAt||0) - (a._createdAt||0));
-    const summaries = qs.map(q => ({ id: q.id, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt, addedBy: q.addedBy || null, addedByUsername: q.addedByUsername || null }));
+    const summaries = qs.map(q => ({ id: q.id, qno: q.qno != null ? Number(q.qno) : null, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt, addedBy: q.addedBy || null, addedByUsername: q.addedByUsername || null }));
     cache.questions = summaries;
     cache.questionsTs = now;
     return sendJson(res, summaries);
@@ -2416,7 +2421,7 @@ const server = http.createServer(async (req, res) => {
         if (!["run","submit"].includes(mode)) return sendJson(res, { error: "mode must be run or submit" }, 400);
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "language must be javascript, python or cpp" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
-        if (customInput !== undefined && mode !== "run") return sendJson(res, { error: "customInput is only allowed with mode=run" }, 400);
+        // customInput rides along on run AND submit (output-only, never scored)
         if (customInput !== undefined && (typeof customInput !== "object" || customInput === null || Array.isArray(customInput))) {
           return sendJson(res, { error: "customInput must be an object keyed by param name" }, 400);
         }
@@ -2460,22 +2465,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Default route → dashboard (app must open on dashboard)
-  if (pathname === "/" ) {
-    return sendFile(res, path.join(ROOT, "dashboard.html"));
-  }
-  // Static
-  let filePath = path.join(ROOT, pathname === "/" ? "dashboard.html" : pathname);
-  if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end("Forbidden"); }
-  try {
-    const stat = fs.statSync(filePath);
-    if (stat.isDirectory()) filePath = path.join(filePath, "index.html");
-  } catch {}
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    return sendFile(res, filePath);
-  }
-  if (!pathname.startsWith("/api/")) {
-    return sendFile(res, path.join(ROOT, "index.html"));
+  // ---------- React SPA (client/dist) ----------
+  // The vanilla *.html + public/* frontend was deleted at cutover; the server
+  // serves the built React app, with an SPA fallback so deep links
+  // (/workspace/:id, /problems, ...) resolve to index.html. /api/* falls
+  // through to the 404 below (all API routes return above).
+  if (!pathname.startsWith("/api/") && req.method === "GET") {
+    const DIST = path.join(ROOT, "client", "dist");
+    const DIST_INDEX = path.join(DIST, "index.html");
+    if (!fs.existsSync(DIST_INDEX)) {
+      res.writeHead(503, { "Content-Type": "text/plain" });
+      return res.end("Frontend not built — run `npm run build` in client/ first.");
+    }
+    let filePath = path.join(DIST, pathname);
+    if (!filePath.startsWith(DIST)) { res.writeHead(403); return res.end("Forbidden"); }
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) filePath = path.join(filePath, "index.html");
+    } catch {}
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      return sendFile(res, filePath);
+    }
+    return sendFile(res, DIST_INDEX);
   }
   res.writeHead(404); res.end("Not found");
 });

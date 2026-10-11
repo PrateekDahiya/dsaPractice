@@ -1,19 +1,35 @@
-# DSA Practice Platform — Vanilla HTML/CSS/JS
+# DSA Practice Platform
 
-LeetCode-like local practice: write code, **Run** (visible tests) and **Submit** (visible + hidden).
+LeetCode-like practice: write code, **Run** (visible tests) and **Submit** (visible + hidden), in JavaScript, Python, and C++.
 
-## Run
+## Run it
+
 ```bash
-node server.js
-# open http://localhost:3000
+npm install                            # bcryptjs, jsonwebtoken, mysql2
+cd client && npm install && npm run build && cd ..   # React frontend → client/dist
+node server.js                         # API + React UI at http://localhost:3000
 ```
-No `npm install` needed. Requires Node 16+ and optionally `python`/`python3` in PATH for Python questions.
 
-Pure frontend fallback: you can also just open `index.html` via a static server (`npx serve .`) — JS execution will happen locally in browser (Python needs `node server.js`).
+Requires Node 18+, MySQL (see `DB_*` env), and optionally `python`/`python3` + `g++` for those languages. Without a DB it falls back to `questions/*.json` files.
 
-## Add a Question — JSON Only
+Frontend dev (hot reload):
 
-Drop a file into `questions/` e.g. `questions/my-question.json`. Refresh.
+```bash
+cd client && npm run dev   # http://localhost:5173, /api proxied to :3000
+```
+
+## Features
+
+- **Workspace** (`/workspace/:id`): problemSDL, resizable panes, C++/JS/Python editor with highlight + lint, run console with case pills + **custom test cases** (added via the `+` pill, run alongside), LeetCode-style Result tab, Performance tab with AI complexity, submission history with restore, per-question discussion-free notes via autosave.
+- **Run modes**: visible-only Run, full Submit, custom-only debug runs (output-only, never scored).
+- **AI**: question generation (Groq, oracle-verified), per-submit complexity estimates, originality guard, **daily challenge** (one generated Medium/Hard per UTC day).
+- **Social**: auth with roles, leaderboard (cached, streak column), dashboards (incl. read-only `?id=`), profiles (avatar/bio), bookmarks (★ Saved filter), roadmap with AI gap-filling, XP-free streaks + heatmap.
+- **Content mgmt**: add/edit/delete questions (owner-or-admin), admin page (users, roles, stale-AI prune), manual mark-as-done, account page (password, export, delete).
+- **Ops**: single-flight C++ compiles with exe cache + lazy PCH, per-IP rate limits, request caps, `/api/health` with heap/RSS/counters.
+
+## Add a Question — JSON
+
+Drop a file into `questions/` e.g. `questions/my-question.json`, or use + Add Question (Raw JSON or guided form — the form merges losslessly over JSON).
 
 See `questions/_schema.json` for full schema. Minimal example:
 
@@ -48,14 +64,23 @@ See `questions/_schema.json` for full schema. Minimal example:
 - `id` must match filename (`two-sum.json` → `id: "two-sum"`, slug `[a-z0-9-]`).
 - `params` order must match `input` keys order.
 - `visibleTestCases` run on **Run**, `visible + hidden` run on **Submit** (hidden not shown until Submit).
-- `functionName` is JS name, `pythonFunctionName` is Python name.
+- `functionName` is JS/C++ name, `pythonFunctionName` is Python name.
+- AI-saved rows get tag `AI` (+ caller tags); daily questions get `daily:<UTC-date>`.
 
-## API
-- `GET /api/questions` → summaries
-- `GET /api/questions/:id` → full question
-- `POST /api/execute` `{questionId, code, language: "javascript"|"python", mode: "run"|"submit"}` → `{mode, total, passed, results: [{testCaseId, passed, input, expected, actual, error, hidden, timeMs, memKb}]}` (`memKb` = best-effort peak KB: JS heap delta, Python `resource`/tracemalloc marker, C++ `/usr/bin/time -v` on Linux, `null` = n/a)
-- `POST /api/complexity` `{questionId, language, code}` → `{time, space, note, expectedTime, expectedSpace}` (Groq-estimated Big-O of your code vs question's expected optimal; sha-cached, failures non-fatal)
+## API (selected)
 
-## Tests
-- JS: `vm` with 2s timeout; Python: `python`/`python3` spawn with 3s timeout.
+- `GET /api/questions` → summaries (10s cache) · `GET /api/questions/:id` → full question
+- `POST /api/questions` (auth) · `PUT/DELETE /api/questions/:id` (owner or admin)
+- `POST /api/execute` `{questionId, code, language, mode}` → `{mode, total, passed, results[]}` — plus `customInput`/`customOnly` for debug runs; per-case `/api/execute/case`, streaming `/api/execute/stream`
+- `POST /api/lint` `{code, language}` → diagnostics (cached, rate-limited, single-flight g++)
+- `POST /api/complexity` `{questionId, language, code}` → `{time, space, note, expectedTime, expectedSpace}`
+- `POST /api/questions/generate` (auth) · `GET /api/daily` · `POST /api/daily/ensure` (auth)
+- Auth: `POST /api/auth/register|login` (rate-limited + honeypot), `GET/PUT/DELETE /api/me`, password/export endpoints
+- Social: `/api/leaderboard?filter=&limit=&streak=1`, `/api/bookmarks`, `/api/manual-solved`, `/api/users/:id/{profile,stats,dashboard}`, `/api/admin/*` (admin only)
+- `GET /api/health` → `{ok, heapMB, rssMB, uptimeSec, lint, exec}`
+
+## Tests & execution
+
+- JS: `vm` with 2s timeout; Python: `python`/`python3` spawn with 3s timeout; C++: `g++ -O0` with exe cache, 3–8s timeouts.
 - `deepEqual` with special case for `two-sum` (order-insensitive numeric arrays).
+- Custom-input rows (`expectedOutput: null`) are output-only and excluded from totals/solves.
