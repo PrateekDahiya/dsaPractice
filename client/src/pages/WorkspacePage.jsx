@@ -237,7 +237,15 @@ function WorkspaceInner() {
     setResultView({ kind: "live", code, lang });
     setTab("result");
     setStatus(mode === "run" ? "Running visible tests..." : "Submitting (all tests)...");
-    const result = await run.run(mode);
+    let result = null;
+    try {
+      result = await run.run(mode);
+    } catch (e) {
+      const msg = "Execution error: " + String((e && e.message) || e);
+      setStatus(msg);
+      notify(msg);
+      return;
+    }
     if (result) {
       setLastRunMeta(`${mode} · ${result.passed}/${result.total} · ${new Date().toLocaleTimeString()}`);
       setStatus(result.passed === result.total ? "All tests passed ✓" : `${result.total - result.passed} test(s) failed`);

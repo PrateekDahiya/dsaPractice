@@ -23,8 +23,26 @@ function deepEqual(a, b, qId) {
   return false;
 }
 
-// Mirrors execute()/localRun() from public/js/run.js: per-case API loop with
-// 429 backoff, batch fallback, offline JS fallback, and custom-input runs.
+// apiFetch with a timeout so a stalled backend surfaces as an error instead
+// of hanging the console forever (fetch has no built-in timeout).
+async function apiFetchTimeout(url, opts = {}, ms = 60000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => {
+    try {
+      ctrl.abort();
+    } catch {
+      // ignore
+    }
+  }, ms);
+  try {
+    return await apiFetch(url, { ...opts, signal: ctrl.signal });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("Request timed out — is the server running?");
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
 export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComplexity, notify }) {
   const [running, setRunning] = useState(false);
   const [payload, setPayload] = useState(null);
@@ -134,7 +152,7 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         for (let i = 0; i < total; i++) {
           let resCase = null;
           for (let attempt = 0; attempt < 6; attempt++) {
-            resCase = await apiFetch("/api/execute/case", {
+            resCase = await apiFetchTimeout("/api/execute/case", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ questionId: q.id, code, language: lang, mode, index: i }),
@@ -158,11 +176,11 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         // per-case failed: fall back to batch
       }
       try {
-        const res = await apiFetch("/api/execute", {
+        const res = await apiFetchTimeout("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ questionId: q.id, code, language: lang, mode }),
-        });
+        }, 120000);
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: res.statusText }));
           throw new Error(err.error || "execution failed");
@@ -173,7 +191,7 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         return result;
       } catch (e) {
         const msg = String((e && e.message) || e);
-        if (msg.includes("Failed to fetch") || msg.includes("fetch")) {
+        if (msg.includes("Failed to fetch") || msg.includes("fetch") || msg.includes("timed out")) {
           result = await localRun(mode, code);
           setLive(null);
           finish(mode, code, result);
@@ -206,11 +224,11 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
       setRunning(true);
       setPayload(null);
       try {
-        const res = await apiFetch("/api/execute", {
+        const res = await apiFetchTimeout("/api/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ questionId: q.id, code, language: gl(), mode: "run", customInput, customOnly: true }),
-        });
+        }, 120000);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "custom run failed");
         const result = { mode: "run", total: data.total ?? 0, passed: data.passed ?? 0, results: data.results || [] };
