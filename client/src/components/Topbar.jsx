@@ -19,13 +19,12 @@ export default function Topbar({ extra = null }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <Link to="/dashboard" className="logo">
+        <Link to="/dashboard" className="logo" title="DSA Practice" aria-label="DSA Practice home">
           <img
             src="/logo.png"
-            alt="Logo"
-            style={{ height: 32, width: "auto", borderRadius: 6, objectFit: "contain" }}
+            alt="DSA Practice"
+            style={{ height: 32, width: "auto", borderRadius: 6, objectFit: "contain", display: "block" }}
           />
-          DSA Practice
         </Link>
         <nav className="topbar-nav">
           {NAV.map((n) => (

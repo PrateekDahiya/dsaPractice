@@ -1,6 +1,5 @@
 /* layout.css — split from style.css. container, sidebar, question list, resizers, main, problem pane, tabs. Load order: base, layout, editor, components, pages, responsive. */
-.container { display: flex; flex: 1; min-height: 0; position: relative; }
-.sidebar {
+.container { display: flex; flex: 1; min-height: 0; position: relative; }.sidebar {
   width: 280px;
   min-width: 200px;
   max-width: 420px;
@@ -77,3 +76,11 @@
 .ptab-panel { display: none; flex: 1; overflow-y: auto; padding: 16px 20px; }
 .ptab-panel.active { display: block; }
 .submissions-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 13px; font-weight: 700; }
+
+/* SPA shell: React root fills the viewport; page scroll is route-dependent
+   (ScrollManager toggles body.route-locked for /workspace, .route-scroll
+   elsewhere — mirrors vanilla's per-page <body> styles). */
+#root { display: flex; flex-direction: column; min-height: 100vh; }
+body.route-locked { height: 100vh; overflow: hidden; }
+body.route-locked #root { height: 100vh; }
+body.route-scroll { height: auto; min-height: 100vh; overflow: auto; }

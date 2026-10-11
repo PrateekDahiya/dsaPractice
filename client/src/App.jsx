@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import WorkspacePage from "./pages/WorkspacePage.jsx";
@@ -11,6 +12,22 @@ import AddQuestionPage from "./pages/AddQuestionPage.jsx";
 import AdminPage from "./pages/AdminPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 
+// Vanilla locks <body> (workspace) vs scrolls it (list pages) per HTML file.
+// The SPA has one body, so mirror that per route: only /workspace locks.
+function ScrollManager() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const locked = pathname === "/workspace";
+    try {
+      document.body.classList.toggle("route-locked", locked);
+      document.body.classList.toggle("route-scroll", !locked);
+    } catch {
+      // ignore
+    }
+  }, [pathname]);
+  return null;
+}
+
 // Route map mirrors the vanilla pages:
 //   / or /dashboard  <- dashboard.html      /workspace <- index.html (editor)
 //   /problems         <- problems.html       /roadmap   <- roadmap.html
@@ -19,6 +36,7 @@ import SettingsPage from "./pages/SettingsPage.jsx";
 export default function App() {
   return (
     <BrowserRouter>
+      <ScrollManager />
       <AuthProvider>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
