@@ -515,6 +515,7 @@ function WorkspaceInner() {
                       expectedSpace={q?.spaceComplexity}
                       statusText={status}
                       lastRunMeta={lastRunMeta}
+                      visibleCases={q?.visibleTestCases}
                       customs={customCases}
                       params={q?.params}
                       onAddCustom={addCustomCase}

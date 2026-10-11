@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // LeetCode-style run console: verdict + runtime header, case pills,
 // single-case Input/Output/Expected cards. Mirrors renderResults() from
@@ -155,80 +155,58 @@ export function ComplexityLine({ est, expectedTime, expectedSpace }) {
   );
 }
 
-// Live + final console. `live` streams cases as they resolve; `payload` is
-// the final result (takes over rendering when present). Custom cases are
-// drafted below the pills (+ adds one) and run alongside on Run/Submit.
-export default function Console({ payload, live, complexity, expectedTime, expectedSpace, statusText, lastRunMeta, customs, params, onAddCustom, onUpdateCustom, onRemoveCustom }) {
-  const [sel, setSel] = useState(0);
+// Live + final console built around TABS (LeetCode-style): stored cases and
+// custom cases are all tabs. Pre-run, stored tabs show Input only; custom
+// tabs are editable and run alongside on Run/Submit.
+export default function Console({ payload, live, complexity, expectedTime, expectedSpace, statusText, lastRunMeta, visibleCases, customs, params, onAddCustom, onUpdateCustom, onRemoveCustom }) {
   const shown = payload || live;
+  const hasResults = !!(shown && (shown.results || []).length);
+  const [sel, setSel] = useState({ kind: "stored", idx: 0 });
   useEffect(() => {
-    setSel(0);
-  }, [payload, live?.results?.length]);
+    setSel({ kind: "stored", idx: 0 });
+  }, [payload, live?.results?.length, (visibleCases || []).length]);
+  const prevCustomLen = useRef((customs || []).length);
+  useEffect(() => {
+    const n = (customs || []).length;
+    if (n > prevCustomLen.current) setSel({ kind: "custom", idx: n - 1 });
+    prevCustomLen.current = n;
+  }, [customs]);
 
-  const editors = (customs || []).length ? (
-    <div style={{ marginTop: 10 }}>
-      <div className="lc-label">Custom test cases ({customs.length}) — run alongside on Run/Submit</div>
-      {customs.map((c, i) => (
-        <div className="lc-card" key={c.key}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 700 }}>Custom {i + 1}</span>
-            {(params || []).length ? (
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>params: {(params || []).join(", ")}</span>
-            ) : null}
-            <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 11, marginLeft: "auto" }} onClick={() => onRemoveCustom(c.key)}>
-              Remove
-            </button>
-          </div>
-          <textarea
-            spellCheck="false"
-            rows={2}
-            value={c.text}
-            onChange={(e) => onUpdateCustom(c.key, e.target.value)}
-            placeholder='{"nums":[1,2,3],"target":3}'
-            style={{
-              width: "100%", background: "var(--code)", color: "var(--text)",
-              border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px",
-              fontFamily: "var(--mono)", fontSize: 12, resize: "vertical",
-            }}
-          />
-        </div>
-      ))}
-    </div>
-  ) : null;
+  const isCustomId = (id) => id === "custom" || String(id || "").startsWith("custom-");
+  const storedRows = hasResults ? (shown.results || []).filter((r) => !isCustomId(r.testCaseId)) : [];
+  const customRows = hasResults ? (shown.results || []).filter((r) => isCustomId(r.testCaseId)) : [];
+  const preRunCases = !hasResults ? (visibleCases || []) : [];
+  const customsList = customs || [];
 
-  if (!shown || !(shown.results || []).length) {
+  const storedCount = hasResults ? storedRows.length : preRunCases.length;
+  const sIdx = sel.kind === "stored" ? Math.min(sel.idx, Math.max(0, storedCount - 1)) : 0;
+  const cIdx = sel.kind === "custom" ? Math.min(sel.idx, Math.max(0, customsList.length - 1)) : 0;
+
+  if (!storedCount && !customsList.length) {
     return (
-      <>
-        <div style={{ color: "var(--muted)", fontSize: 13 }}>
-          Hit <strong>Run</strong> to test visible cases, <strong>Submit</strong> for all.
-        </div>
-        {onAddCustom ? (
-          <div style={{ marginTop: 8 }}>
-            <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={onAddCustom} title="Add a custom test case">
-              + Custom case
-            </button>
-          </div>
-        ) : null}
-        {editors}
-      </>
+      <div style={{ color: "var(--muted)", fontSize: 13 }}>
+        Hit <strong>Run</strong> to test visible cases, <strong>Submit</strong> for all.
+      </div>
     );
   }
-  const { mode, results, total, passed } = shown;
-  const v = verdictOf(shown);
-  const avg = runtimeAvg(results);
-  const current = results[Math.min(sel, results.length - 1)];
+
+  const mode = hasResults ? shown.mode : "run";
+  const { total, passed } = hasResults ? shown : { total: storedCount, passed: 0 };
+  const v = hasResults ? verdictOf(shown) : null;
+  const avg = hasResults ? runtimeAvg(shown.results) : 0;
+
   return (
     <>
-      <div className="console-head">
-        <span className={v.cls}>{v.label}</span>
-        <span className="run-meta">
-          Runtime: {current ? `${current.timeMs ?? 0} ms` : `${avg} ms`}
-        </span>
-        <span className={`results-summary ${passed === total ? "pass" : "fail"}`} style={{ marginLeft: "auto" }}>
-          {passed} / {total}
-        </span>
-      </div>
-      {mode === "submit" ? (
+      {hasResults ? (
+        <div className="console-head">
+          <span className={v.cls}>{v.label}</span>
+          <span className="run-meta">Runtime: {avg} ms</span>
+          <span className={`results-summary ${passed === total ? "pass" : "fail"}`} style={{ marginLeft: "auto" }}>
+            {passed} / {total}
+          </span>
+        </div>
+      ) : null}
+      {hasResults && mode === "submit" ? (
         <div className="run-stats" style={{ fontSize: 12, color: "var(--muted)", margin: "-4px 0 10px" }}>
           {complexity ? (
             <ComplexityLine est={complexity} expectedTime={expectedTime} expectedSpace={expectedSpace} />
@@ -237,15 +215,98 @@ export default function Console({ payload, live, complexity, expectedTime, expec
           )}
         </div>
       ) : null}
-      <CasePills results={results} sel={Math.min(sel, results.length - 1)} onSelect={setSel} onAdd={onAddCustom} />
-      <CaseDetail r={current} />
-      {editors}
+      <div className="case-pills">
+        {hasResults
+          ? storedRows.map((r, i) => (
+              <button
+                key={r.testCaseId + i}
+                className={`case-pill ${r.passed === true ? "pass" : r.passed === false ? "fail" : "custom"}${sel.kind === "stored" && i === sIdx ? " active" : ""}`}
+                title={`Case ${i + 1}${r.hidden ? " (hidden)" : ""} — ${r.passed ? "Passed" : "Failed"}`}
+                onClick={() => setSel({ kind: "stored", idx: i })}
+              >
+                <span className="pill-icon">{r.passed === true ? "✓" : r.passed === false ? "✕" : "•"}</span> Case {i + 1}
+              </button>
+            ))
+          : preRunCases.map((tc, i) => (
+              <button
+                key={"pre" + i}
+                className={`case-pill${sel.kind === "stored" && i === sIdx ? " active" : ""}`}
+                title={`Case ${i + 1} — not run yet`}
+                onClick={() => setSel({ kind: "stored", idx: i })}
+              >
+                <span className="pill-icon">•</span> Case {i + 1}
+              </button>
+            ))}
+        {customsList.map((c, i) => (
+          <button
+            key={c.key}
+            className={`case-pill custom${sel.kind === "custom" && i === cIdx ? " active" : ""}`}
+            title={`Custom ${i + 1} — your input, output only`}
+            onClick={() => setSel({ kind: "custom", idx: i })}
+          >
+            <span className="pill-icon">•</span> Custom {i + 1}
+          </button>
+        ))}
+        {onAddCustom ? (
+          <button className="case-pill custom" title="Add a custom test case" onClick={onAddCustom}>
+            <span className="pill-icon">+</span>
+          </button>
+        ) : null}
+      </div>
+      {sel.kind === "custom" && customsList[cIdx] ? (
+        <CustomDetail
+          c={customsList[cIdx]}
+          num={cIdx + 1}
+          params={params}
+          out={customRows[cIdx] || null}
+          onUpdate={onUpdateCustom}
+          onRemove={onRemoveCustom}
+        />
+      ) : hasResults ? (
+        <CaseDetail r={storedRows[sIdx]} />
+      ) : preRunCases[sIdx] ? (
+        <>
+          <div className="lc-label">Input</div>
+          <div className="lc-card">{lcInputHtml(preRunCases[sIdx].input)}</div>
+        </>
+      ) : null}
       {statusText ? (
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
           {statusText}
           {lastRunMeta ? ` · ${lastRunMeta}` : ""}
         </div>
       ) : null}
+    </>
+  );
+}
+
+function CustomDetail({ c, num, params, out, onUpdate, onRemove }) {
+  return (
+    <>
+      <div className="lc-label">Custom {num} input {(params || []).length ? <span style={{ fontWeight: 400 }}>({(params || []).join(", ")})</span> : null}</div>
+      <div className="lc-card">
+        <textarea
+          spellCheck="false"
+          rows={2}
+          value={c.text}
+          onChange={(e) => onUpdate(c.key, e.target.value)}
+          placeholder='{"nums":[1,2,3],"target":3}'
+          style={{
+            width: "100%", background: "var(--code)", color: "var(--text)",
+            border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px",
+            fontFamily: "var(--mono)", fontSize: 12, resize: "vertical",
+          }}
+        />
+        <div style={{ display: "flex", marginTop: 6 }}>
+          <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 11, marginLeft: "auto" }} onClick={() => onRemove(c.key)}>
+            Remove
+          </button>
+        </div>
+      </div>
+      <div className="lc-label">Output</div>
+      <div className="lc-card">
+        {out ? <pre>{out.error ? out.error : fmtJson(out.actual)}</pre> : <pre style={{ color: "var(--muted)" }}>Run to see output</pre>}
+      </div>
     </>
   );
 }
