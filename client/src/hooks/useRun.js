@@ -209,21 +209,20 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
     [finish, localRun]
   );
 
-  const runCustom = useCallback(
+  // Execute ONE custom input (output-only). Never throws: transport problems
+  // come back as an error result row so the console can render them inline.
+  const runCustomOne = useCallback(
     async (customInput) => {
-      const { getQuestion: gq, getLang: gl, getCode: gc, notify: nt } = cbRef.current;
+      const { getQuestion: gq, getLang: gl, getCode: gc } = cbRef.current;
       const q = gq();
-      if (!q) {
-        nt("Select a problem first");
-        return null;
-      }
+      const fail = (msg) => ({
+        testCaseId: "custom", passed: null, input: customInput, expected: null,
+        actual: null, error: msg, hidden: false, timeMs: 0, memKb: null,
+      });
+      if (!q) return fail("Select a problem first");
       const code = gc();
-      if (!code.trim()) {
-        nt("Write some code first");
-        return null;
-      }
-      setRunning(true);
-      setPayload(null);
+      if (!code.trim()) return fail("Write some code first");
+      const start = Date.now();
       try {
         const res = await apiFetchTimeout("/api/execute", {
           method: "POST",
@@ -231,20 +230,16 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
           body: JSON.stringify({ questionId: q.id, code, language: gl(), mode: "run", customInput, customOnly: true }),
         }, 120000);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "custom run failed");
-        const result = { mode: "run", total: data.total ?? 0, passed: data.passed ?? 0, results: data.results || [] };
-        finish("run", code, result);
-        return result;
+        if (!res.ok) return fail(data.error || "custom run failed");
+        const row = (data.results || [])[0];
+        if (!row) return fail("empty custom output");
+        return { ...row, timeMs: row.timeMs ?? (Date.now() - start) };
       } catch (e) {
-        nt(String((e && e.message) || e));
-        finish("run", code, null);
-        return null;
-      } finally {
-        setRunning(false);
+        return fail(String((e && e.message) || e));
       }
     },
-    [finish]
+    []
   );
 
-  return { running, payload, live, run, runCustom, clear: () => { setPayload(null); setLive(null); } };
+  return { running, payload, live, run, runCustomOne, setResult: (r) => setPayload(r), clear: () => { setPayload(null); setLive(null); } };
 }

@@ -34,7 +34,7 @@ function verdictOf(payload) {
 // Mirrors resultViewInner()/showSubmitResult()/showSubmissionInResult().
 export default function ResultTab({ payload, code, langLabel, lang, sub, complexity, expectedTime, expectedSpace }) {
   const results = payload?.results || [];
-  const failedIdx = results.findIndex((r) => !r.passed);
+  const failedIdx = results.findIndex((r) => r.passed === false);
   const [sel, setSel] = useState(failedIdx >= 0 ? failedIdx : 0);
   if (!payload || !payload.results) {
     return (
@@ -48,7 +48,7 @@ export default function ResultTab({ payload, code, langLabel, lang, sub, complex
   }
   const { total, passed } = payload;
   const v = verdictOf(payload);
-  const failed = results.filter((r) => !r.passed).length;
+  const failed = results.filter((r) => r.passed === false).length;
   const shown = Math.min(sel, results.length - 1);
   return (
     <>

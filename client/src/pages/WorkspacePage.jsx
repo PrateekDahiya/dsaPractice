@@ -5,7 +5,6 @@ import ProblemList from "../components/ProblemList.jsx";
 import ProblemView from "../components/ProblemView.jsx";
 import EditorPane from "../components/EditorPane.jsx";
 import Console from "../components/Console.jsx";
-import CustomPanel from "../components/CustomPanel.jsx";
 import SubmissionView from "../components/SubmissionView.jsx";
 import ResultTab from "../components/ResultTab.jsx";
 import PerfTab from "../components/PerfTab.jsx";
@@ -62,7 +61,7 @@ function WorkspaceInner() {
   const [lastRunMeta, setLastRunMeta] = useState("");
   const [marking, setMarking] = useState(false);
   const [bookmarking, setBookmarking] = useState(false);
-  const [customOpen, setCustomOpen] = useState(false);
+  const [customCases, setCustomCases] = useState([]); // [{key, text}] drafted custom inputs
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [modal, setModal] = useState(null); // null | { initial: question|null }
   const [listCount, setListCount] = useState("");
@@ -162,6 +161,7 @@ function WorkspaceInner() {
         history.refresh(question.id);
         run.clear();
         setResultView(null);
+        setCustomCases([]); // drafts belong to the previous question's params
         setStatus(`Loaded: ${question.title}`);
       } catch (e) {
         setStatus("Failed to load question: " + id);
@@ -220,9 +220,36 @@ function WorkspaceInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function addCustomCase() {
+    const first = qRef.current?.visibleTestCases?.[0];
+    const prefill = first && first.input ? JSON.stringify(first.input) : "{}";
+    setCustomCases((prev) => [...prev, { key: Date.now() + "_" + Math.random().toString(36).slice(2, 7), text: prefill }]);
+  }
+
   async function doRun(mode) {
     if (!qRef.current) {
       notify("Select a problem first");
+      return;
+    }
+    // parse drafted customs first — abort before spending a compile on bad JSON
+    let customs = [];
+    try {
+      customs = customCases.map((c, i) => {
+        let input;
+        try {
+          input = JSON.parse(c.text || "{}");
+        } catch (e) {
+          throw new Error(`Custom ${i + 1} is not valid JSON: ` + e.message);
+        }
+        if (typeof input !== "object" || input === null || Array.isArray(input)) {
+          throw new Error(`Custom ${i + 1} must be a JSON object keyed by param name`);
+        }
+        return input;
+      });
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      setStatus(msg);
+      notify(msg);
       return;
     }
     complexity.clear();
@@ -245,6 +272,17 @@ function WorkspaceInner() {
       setStatus(msg);
       notify(msg);
       return;
+    }
+    if (result && customs.length) {
+      // customs run after stored cases (one cheap customOnly call each),
+      // appended as Custom 1..N rows — output-only, never scored
+      const rows = [];
+      for (let k = 0; k < customs.length; k++) {
+        const row = await run.runCustomOne(customs[k]);
+        rows.push({ ...row, testCaseId: `custom-${k + 1}` });
+      }
+      result = { ...result, results: [...result.results, ...rows] };
+      run.setResult(result); // keep the right console in sync (it reads hook state)
     }
     if (result) {
       setLastRunMeta(`${mode} · ${result.passed}/${result.total} · ${new Date().toLocaleTimeString()}`);
@@ -460,7 +498,6 @@ function WorkspaceInner() {
                   running={run.running}
                   onRun={doRun}
                   onShortcuts={() => setShortcutsOpen(true)}
-                  onCustom={() => setCustomOpen((v) => !v)}
                   topStyle={{ flex: `${topGrow} 1 0`, minHeight: 0 }}
                 />
                 <div id="editor-resizer" className="resizer horizontal" onMouseDown={(e) => startDrag("editor", e)}></div>
@@ -478,9 +515,15 @@ function WorkspaceInner() {
                       expectedSpace={q?.spaceComplexity}
                       statusText={status}
                       lastRunMeta={lastRunMeta}
+                      customs={customCases}
+                      params={q?.params}
+                      onAddCustom={addCustomCase}
+                      onUpdateCustom={(key, text) =>
+                        setCustomCases((prev) => prev.map((c) => (c.key === key ? { ...c, text } : c)))
+                      }
+                      onRemoveCustom={(key) => setCustomCases((prev) => prev.filter((c) => c.key !== key))}
                     />
                   </div>
-                  {customOpen ? <CustomPanel question={q} running={run.running} onRun={(input) => run.runCustom(input)} /> : null}
                 </div>
               </div>
             )}

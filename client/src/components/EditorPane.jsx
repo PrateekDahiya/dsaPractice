@@ -3,7 +3,7 @@ import { memo } from "react";
 // Static editor DOM: the ported own-editor factory binds these exact IDs on
 // mount (see useEditor). Never re-rendered with different ids — the factory
 // owns everything inside #oe-wrap after creation.
-function EditorPane({ lang, onLangChange, onFormat, onReset, running, onRun, onShortcuts, onCustom, topStyle }) {
+function EditorPane({ lang, onLangChange, onFormat, onReset, running, onRun, onShortcuts, topStyle }) {
   return (
     <>
       <div className="editor-header">
@@ -30,9 +30,6 @@ function EditorPane({ lang, onLangChange, onFormat, onReset, running, onRun, onS
           </button>
           <button id="submit-btn" className="btn primary" disabled={running} onClick={() => onRun("submit")}>
             Submit
-          </button>
-          <button id="custom-btn" className="btn ghost" title="Run with your own input" onClick={onCustom}>
-            Custom
           </button>
         </div>
       </div>

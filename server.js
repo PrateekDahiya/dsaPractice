@@ -2416,7 +2416,7 @@ const server = http.createServer(async (req, res) => {
         if (!["run","submit"].includes(mode)) return sendJson(res, { error: "mode must be run or submit" }, 400);
         if (!["javascript","python","cpp"].includes(language)) return sendJson(res, { error: "language must be javascript, python or cpp" }, 400);
         if (code.length > 50000) return sendJson(res, { error: "Code too large (max 50k)" }, 400);
-        if (customInput !== undefined && mode !== "run") return sendJson(res, { error: "customInput is only allowed with mode=run" }, 400);
+        // customInput rides along on run AND submit (output-only, never scored)
         if (customInput !== undefined && (typeof customInput !== "object" || customInput === null || Array.isArray(customInput))) {
           return sendJson(res, { error: "customInput must be an object keyed by param name" }, 400);
         }
