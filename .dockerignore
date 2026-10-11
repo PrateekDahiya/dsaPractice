@@ -7,4 +7,6 @@ tools
 .env.local
 .env
 mingw64
+client/node_modules
+client/dist
 

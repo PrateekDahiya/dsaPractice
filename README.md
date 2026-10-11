@@ -5,16 +5,17 @@ LeetCode-like practice: write code, **Run** (visible tests) and **Submit** (visi
 ## Run it
 
 ```bash
-npm install          # bcryptjs, jsonwebtoken, mysql2
-node server.js       # API + vanilla UI at http://localhost:3000
+npm install                            # bcryptjs, jsonwebtoken, mysql2
+cd client && npm install && npm run build && cd ..   # React frontend → client/dist
+node server.js                         # API + React UI at http://localhost:3000
 ```
 
 Requires Node 18+, MySQL (see `DB_*` env), and optionally `python`/`python3` + `g++` for those languages. Without a DB it falls back to `questions/*.json` files.
 
-React frontend (in progress on `frontend-migration`):
+Frontend dev (hot reload):
 
 ```bash
-cd client && npm install && npm run dev   # http://localhost:5173, /api proxied to :3000
+cd client && npm run dev   # http://localhost:5173, /api proxied to :3000
 ```
 
 ## Features

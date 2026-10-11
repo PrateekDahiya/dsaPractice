@@ -4,8 +4,9 @@ Read this before touching anything under `client/`.
 
 ## What it is
 
-Vite + React 18 SPA (`frontend-migration` branch) porting the vanilla UI
-(`../*.html`, `../public/js/*.js`). Backend API frozen — see root README.
+Vite + React 18 SPA — the only frontend (vanilla `*.html` + `public/`
+deleted at cutover; the server serves `client/dist` + SPA fallback).
+Backend API frozen — see root README.
 Dev: `npm run dev` (port 5173, `/api` → 127.0.0.1:3000). Build: `npm run build`.
 
 ## Architecture rules (do not break)
@@ -15,8 +16,8 @@ Dev: `npm run dev` (port 5173, `/api` → 127.0.0.1:3000). Build: `npm run build
    `useState` in pages. Cross-hook sharing goes through props or `window.__*`
    bridge keys already in use (`__oe`, `__cmLang`, `__questionCtx`,
    `__lastRun`, `__lastComplexity`, `__lastSubmissionId`).
-2. **Editor is a singleton factory** (`editor/ownEditor.js`, ported from
-   `../public/js/ownEditor.js` + `AbortController` destroy). Exactly one
+2. **Editor is a singleton factory** (`editor/ownEditor.js` +
+   `AbortController` destroy). Exactly one
    `<EditorPane>` mounted at a time; `useEditor` creates on mount, destroys
    on unmount. Element IDs are a contract (`code-editor`, `oe-hl`,
    `oe-gutter`, `oe-suggest`, `oe-hover`, `oe-wrap`, `status-text`,
@@ -26,8 +27,8 @@ Dev: `npm run dev` (port 5173, `/api` → 127.0.0.1:3000). Build: `npm run build
    (60s/case, 120s batch); bookkeeping fire-and-forget so buttons always
    release. Custom cases run after stored ones via `runCustomOne`, merged
    client-side as `custom-N` rows (server scores stored only).
-4. **Styling**: the 6 `src/styles/*.css` files are COPIES — edit here, never
-   `../public/css/` for React work. `#root > div` flex rule in `layout.css`
+4. **Styling**: the 6 `src/styles/*.css` files are the only stylesheets.
+   `#root > div` flex rule in `layout.css`
    is load-bearing for workspace pane constraints; `body.route-locked`
    (workspace) vs `body.route-scroll` (driven by `ScrollManager` in
    `App.jsx`) controls page scroll.

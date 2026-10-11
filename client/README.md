@@ -30,7 +30,7 @@ src/
                        format.js (verbatim formatter)
   pages/               10 route pages
   styles/              base/layout/editor/components/pages/responsive.css
-                       (copied from ../public/css; evolves HERE, not there)
+                        (the only stylesheets; vanilla originals deleted)
 ```
 
 ## Conventions

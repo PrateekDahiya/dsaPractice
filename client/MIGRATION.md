@@ -1,16 +1,13 @@
-# Vanilla → React migration map
+# Vanilla → React migration map — COMPLETE (cutover done, vanilla deleted)
 
-Source of truth while migrating: repo root (`../*.html`, `../public/js/*.js`,
-`../public/css/*.css`). API is frozen — no backend changes for this migration.
+Source of truth was the repo root (`*.html`, `public/js/*.js`,
+`public/css/*.css`) — deleted at cutover. API is frozen.
 
 ## Conventions (decided)
 
 - React Router (`/dashboard /workspace /problems /roadmap /leaderboard
   /login /register /add-question /admin /settings`), Context + hooks, plain
-  CSS (the 6 files under `src/styles/`, copied verbatim from `public/css/`).
-- `src/styles/` is a COPY. While both UIs live, styles evolve here; do not
-  edit `../public/css/` for React work (and vice versa) to avoid confusion.
-  At cutover the vanilla files are deleted.
+  CSS (the 6 files under `src/styles/`).
 - `esc()` stays mandatory anywhere user content renders (see `api/client.js`).
 - Honeypot (`website` field), 429-retry, and admin-gate semantics must be
   preserved 1:1 (server enforces; client mirrors messages).
@@ -46,8 +43,8 @@ ProfileCard · AccountCard · DailyCard · StepCard · UsersTable.
    settings → dashboard.
 3. Workspace (hardest, last): list → problem → editor (verbatim own-editor
    port) → console → tabs → modal.
-4. Cutover: server serves `client/dist` + SPA fallback; delete vanilla
-   files; Render build adds `npm --prefix client install && npm --prefix client run build`.
+4. Cutover ✅ done: server serves `client/dist` + SPA fallback; vanilla
+   files deleted; Docker build runs `npm --prefix client` install + build.
 
 ## Validation per phase
 

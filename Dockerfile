@@ -14,6 +14,11 @@ RUN npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit 
 
 COPY . .
 
+# Build the React frontend (vite is a devDependency: install, build, then
+# drop client/node_modules to keep the image small for the free tier)
+RUN cd client && npm ci --no-audit --no-fund && npm run build && rm -rf node_modules \
+    && npm cache clean --force
+
 # Render sets PORT env; expose for local
 EXPOSE 3000
 ENV NODE_ENV=production \
