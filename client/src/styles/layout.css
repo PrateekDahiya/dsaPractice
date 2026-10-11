@@ -1,4 +1,7 @@
 /* layout.css — split from style.css. container, sidebar, question list, resizers, main, problem pane, tabs. Load order: base, layout, editor, components, pages, responsive. */
+/* SPA page wrapper (direct #root child): column flex so workspace panes stay
+   viewport-constrained; scroll pages grow naturally with content. */
+#root > div { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .container { display: flex; flex: 1; min-height: 0; position: relative; }.sidebar {
   width: 280px;
   min-width: 200px;
