@@ -19,11 +19,13 @@ export function useHistory(questionId) {
   const [loading, setLoading] = useState(false);
   const [viewingSubmission, setViewingSubmission] = useState(null);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const q = questionId ? `?questionId=${encodeURIComponent(questionId)}&limit=50` : `?limit=50`;
-      const res = await apiFetch(`/api/submissions${q}`);
+  const refresh = useCallback(
+    async (overrideId) => {
+      const qid = overrideId !== undefined ? overrideId : questionId;
+      setLoading(true);
+      try {
+        const q = qid ? `?questionId=${encodeURIComponent(qid)}&limit=50` : `?limit=50`;
+        const res = await apiFetch(`/api/submissions${q}`);
       if (!res.ok) throw new Error();
       const rows = await res.json();
       setHistory(rows.map((r) => ({ ...r, ts: r.ts || new Date(r.createdAt).getTime() })));

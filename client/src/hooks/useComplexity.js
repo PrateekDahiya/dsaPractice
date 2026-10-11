@@ -45,5 +45,5 @@ export function useComplexity() {
     }
   }, []);
 
-  return { lastComplexity, loading, error, request };
+  return { lastComplexity, loading, error, request, clear: () => { setLastComplexity(null); setError(""); } };
 }

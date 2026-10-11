@@ -155,7 +155,6 @@ export function useEditor({ getLang, getQuestion, notify }) {
     setCode(formatCode(getCode()));
     saveLocal();
   }, [getCode, setCode, saveLocal]);
-
   const resetToStarter = useCallback(
     (q, lang) => {
       if (!q) return;
@@ -169,6 +168,10 @@ export function useEditor({ getLang, getQuestion, notify }) {
     },
     [setCode, saveLocal]
   );
+
+  const resetSaveMarker = useCallback(() => {
+    lastDbSavedCode.current = "";
+  }, []);
 
   const saveToDbRef = useRef(null);
   saveToDbRef.current = saveToDb;
@@ -250,5 +253,5 @@ export function useEditor({ getLang, getQuestion, notify }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { ready: !!editorApi, getCode, setCode, loadStarter, format, resetToStarter, saveToDb, editorApi };
+  return { ready: !!editorApi, getCode, setCode, loadStarter, format, resetToStarter, saveToDb, saveLocal, resetSaveMarker, editorApi };
 }
