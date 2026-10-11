@@ -1767,6 +1767,7 @@ const server = http.createServer(async (req, res) => {
       throw e;
     }
     await persistQuestion(q, user);
+    cache.questions = null; // summaries (10s cache) must include the new row at once
     return {
       id: q.id, title: q.title, difficulty: q.difficulty,
       visible: visibleTestCases.length, hidden: hiddenTestCases.length, model: usedModel, attempts,
