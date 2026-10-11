@@ -40,9 +40,11 @@ export default function ProblemList({
         (x) =>
           x.title.toLowerCase().includes(q) ||
           x.id.includes(q) ||
+          String(x.qno ?? "").includes(q) ||
           (x.tags || []).join(" ").toLowerCase().includes(q)
       );
     if (sort === "recent") list.sort((a, b) => (b._createdAt || 0) - (a._createdAt || 0));
+    else if (sort === "qno") list.sort((a, b) => (a.qno ?? 1e9) - (b.qno ?? 1e9));
     else if (sort === "title") list.sort((a, b) => a.title.localeCompare(b.title));
     else if (sort === "difficulty") {
       const order = { Easy: 0, Medium: 1, Hard: 2 };
@@ -75,6 +77,7 @@ export default function ProblemList({
         <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1 }}>
           <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort" style={sel}>
             <option value="recent">Recent</option>
+            <option value="qno">Number</option>
             <option value="title">Title A-Z</option>
             <option value="difficulty">Difficulty</option>
           </select>
@@ -144,7 +147,7 @@ export default function ProblemList({
               data-id={q.id}
               onClick={() => onSelect(q.id)}
             >
-              <div className="q-title">{q.title}</div>
+              <div className="q-title">{q.qno != null ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>{q.qno} · </span> : null}{q.title}</div>
               <div className="q-meta">
                 <span className={`badge ${q.difficulty}`}>{q.difficulty}</span>
                 <span>{(q.tags || []).join(" · ")}</span>

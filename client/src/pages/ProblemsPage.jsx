@@ -100,6 +100,7 @@ export default function ProblemsPage() {
         (x) =>
           x.title.toLowerCase().includes(q) ||
           x.id.includes(q) ||
+          String(x.qno ?? "").includes(q) ||
           (x.tags || []).join(" ").toLowerCase().includes(q)
       );
     if (status === "saved") out = out.filter((x) => savedSet.has(x.id));
@@ -107,6 +108,7 @@ export default function ProblemsPage() {
     else if (status === "attempted") out = out.filter((x) => !solvedSet.has(x.id) && attemptedSet.has(x.id));
     else if (status === "todo") out = out.filter((x) => !solvedSet.has(x.id) && !attemptedSet.has(x.id));
     if (sort === "recent") out.sort((a, b) => (b._createdAt || 0) - (a._createdAt || 0));
+    else if (sort === "qno") out.sort((a, b) => (a.qno ?? 1e9) - (b.qno ?? 1e9));
     else if (sort === "title") out.sort((a, b) => a.title.localeCompare(b.title));
     else if (sort === "difficulty") {
       const o = { Easy: 0, Medium: 1, Hard: 2 };
@@ -177,6 +179,7 @@ export default function ProblemsPage() {
           </select>
           <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort" style={sel}>
             <option value="recent">Recently added</option>
+            <option value="qno">Number</option>
             <option value="title">Title A–Z</option>
             <option value="difficulty">Difficulty</option>
             <option value="attempted">Most attempted</option>
@@ -217,7 +220,7 @@ export default function ProblemsPage() {
                 );
                 return (
                   <tr key={x.id}>
-                    <td style={{ color: "var(--muted)" }}>{i + 1}</td>
+                    <td style={{ color: "var(--muted)" }}>{x.qno ?? i + 1}</td>
                     <td className="lb-user">
                       <Link to={`/workspace/${x.id}`}>{x.title}</Link>
                       <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>

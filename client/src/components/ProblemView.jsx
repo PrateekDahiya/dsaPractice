@@ -46,7 +46,7 @@ export default function ProblemView({
 
   return (
     <>
-      <div className="problem-title">{q.title}</div>
+      <div className="problem-title">{q.qno != null ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>#{q.qno} · </span> : null}{q.title}</div>
       <div className="problem-meta">
         <span className={`badge ${q.difficulty}`}>{q.difficulty}</span>
         <span style={{ color: "var(--muted)", fontSize: 13 }}>{(q.tags || []).join(" · ")}</span>

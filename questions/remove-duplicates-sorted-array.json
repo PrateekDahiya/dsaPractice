@@ -1,5 +1,6 @@
 {
   "id": "remove-duplicates-sorted-array",
+  "qno": 5,
   "title": "Remove Duplicates from Sorted Array",
   "difficulty": "Easy",
   "tags": [

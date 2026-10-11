@@ -1,5 +1,6 @@
 {
   "id": "two-sum",
+  "qno": 1,
   "title": "Two Sum",
   "difficulty": "Easy",
   "tags": ["Array", "Hash Map"],

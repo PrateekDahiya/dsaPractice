@@ -1529,7 +1529,7 @@ const server = http.createServer(async (req, res) => {
     }
     const qs = await loadQuestions();
     qs.sort((a,b)=> (b._createdAt||0) - (a._createdAt||0));
-    const summaries = qs.map(q => ({ id: q.id, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt, addedBy: q.addedBy || null, addedByUsername: q.addedByUsername || null }));
+    const summaries = qs.map(q => ({ id: q.id, qno: q.qno != null ? Number(q.qno) : null, title: q.title, difficulty: q.difficulty, tags: q.tags || [], createdAt: q.createdAt || new Date(q._createdAt).toISOString(), _createdAt: q._createdAt, addedBy: q.addedBy || null, addedByUsername: q.addedByUsername || null }));
     cache.questions = summaries;
     cache.questionsTs = now;
     return sendJson(res, summaries);
