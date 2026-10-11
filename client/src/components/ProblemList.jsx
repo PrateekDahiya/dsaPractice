@@ -66,8 +66,7 @@ export default function ProblemList({
   return (
     <>
       <div className="sidebar-header">
-        <h2>Problems</h2>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1 }}>
           <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort" style={sel}>
             <option value="recent">Recent</option>
             <option value="title">Title A-Z</option>

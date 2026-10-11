@@ -3,7 +3,7 @@ import { memo } from "react";
 // Static editor DOM: the ported own-editor factory binds these exact IDs on
 // mount (see useEditor). Never re-rendered with different ids — the factory
 // owns everything inside #oe-wrap after creation.
-function EditorPane({ lang, onLangChange, onFormat, onReset, running, onRun, onShortcuts, onCustom }) {
+function EditorPane({ lang, onLangChange, onFormat, onReset, running, onRun, onShortcuts, onCustom, topStyle }) {
   return (
     <>
       <div className="editor-header">
@@ -36,7 +36,7 @@ function EditorPane({ lang, onLangChange, onFormat, onReset, running, onRun, onS
           </button>
         </div>
       </div>
-      <div id="editor-top" className="editor-top">
+      <div id="editor-top" className="editor-top" style={topStyle}>
         <div id="oe-wrap">
           <div id="oe-gutter" aria-hidden="true"></div>
           <div id="oe-stack">

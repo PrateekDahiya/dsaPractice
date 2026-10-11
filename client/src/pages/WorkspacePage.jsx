@@ -57,7 +57,7 @@ function WorkspaceInner() {
   });
 
   const [tab, setTab] = useState("desc");
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [status, setStatus] = useState("Ready");
   const [lastRunMeta, setLastRunMeta] = useState("");
   const [marking, setMarking] = useState(false);
@@ -66,7 +66,62 @@ function WorkspaceInner() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [modal, setModal] = useState(null); // null | { initial: question|null }
   const [listCount, setListCount] = useState("");
-  const [lastRun, setLastRun] = useState(null); // { payload, qid }
+  const [lastRun, setLastRun] = useState(null); // { payload, qid } — feeds perf tab
+  const [resultView, setResultView] = useState(null); // {kind:'live'|'run',code,lang} | {kind:'submission',entry}
+  const [sideW, setSideW] = useState(280);
+  const [leftGrow, setLeftGrow] = useState(1.1);
+  const [editorGrow, setEditorGrow] = useState(1);
+  const [topGrow, setTopGrow] = useState(1);
+  const [bottomGrow, setBottomGrow] = useState(1);
+  const mainRef = useRef(null);
+  const leftRef = useRef(null);
+  const editorPaneRef = useRef(null);
+
+  // Drag resizers (mirrors makeVerticalResizer/makeHorizontalResizer).
+  function startDrag(kind, e) {
+    e.preventDefault();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let leftPx = 0;
+    let mainW = 1;
+    let topPx = 0;
+    let paneH = 1;
+    try {
+      if (kind === "split" && mainRef.current) {
+        mainW = mainRef.current.getBoundingClientRect().width || 1;
+        leftPx = leftRef.current ? leftRef.current.getBoundingClientRect().width : mainW / 2;
+      }
+      if (kind === "editor" && editorPaneRef.current) {
+        const r = editorPaneRef.current.getBoundingClientRect();
+        paneH = r.height || 1;
+        topPx = (paneH * topGrow) / (topGrow + bottomGrow);
+      }
+    } catch {
+      // measure failures keep defaults
+    }
+    const sW = sideW;
+    function onMove(ev) {
+      if (kind === "side") {
+        setSideW(Math.max(200, Math.min(520, sW + (ev.clientX - sx))));
+      } else if (kind === "split") {
+        const nl = Math.max(260, leftPx + (ev.clientX - sx));
+        const rest = Math.max(320, mainW - nl);
+        setLeftGrow(nl);
+        setEditorGrow(rest);
+      } else if (kind === "editor") {
+        const nt = Math.max(120, topPx + (ev.clientY - sy));
+        const nb = Math.max(120, paneH - nt);
+        setTopGrow(nt);
+        setBottomGrow(nb);
+      }
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   function syncCtx(question, language) {
     try {
@@ -106,6 +161,7 @@ function WorkspaceInner() {
         }
         history.refresh(question.id);
         run.clear();
+        setResultView(null);
         setStatus(`Loaded: ${question.title}`);
       } catch (e) {
         setStatus("Failed to load question: " + id);
@@ -175,18 +231,30 @@ function WorkspaceInner() {
     } catch {
       // ignore
     }
+    history.setViewingSubmission(null);
+    const code = editor.getCode();
+    const lang = langRef.current;
+    setResultView({ kind: "live", code, lang });
+    setTab("result");
     setStatus(mode === "run" ? "Running visible tests..." : "Submitting (all tests)...");
     const result = await run.run(mode);
     if (result) {
       setLastRunMeta(`${mode} · ${result.passed}/${result.total} · ${new Date().toLocaleTimeString()}`);
       setStatus(result.passed === result.total ? "All tests passed ✓" : `${result.total - result.passed} test(s) failed`);
       setLastRun({ payload: result, qid: qRef.current.id });
-      if (mode === "submit") setTab("result");
+      setResultView({ kind: "run", payload: result, code, lang });
       await questions.refreshSolvedState();
       await history.refresh();
     } else {
       setStatus("Execution error");
     }
+  }
+
+  function openSubmission(e) {
+    if (!e) return;
+    history.setViewingSubmission(e);
+    setResultView({ kind: "submission", entry: e });
+    setTab("result");
   }
 
   async function doLangChange(next) {
@@ -271,7 +339,7 @@ function WorkspaceInner() {
       />
       <div className="container" id="container">
         {showSidebar ? (
-          <aside className="sidebar" id="sidebar">
+          <aside className="sidebar" id="sidebar" style={{ width: sideW, minWidth: 200, maxWidth: 520, flexShrink: 0 }}>
             <ProblemList
               questions={questions.questions}
               currentId={q?.id}
@@ -284,13 +352,16 @@ function WorkspaceInner() {
             />
           </aside>
         ) : null}
-        <main className="main" id="main">
-          <section className="problem-pane" id="problem-pane" style={{ flex: 1.1 }}>
+        {showSidebar ? (
+          <div id="sidebar-resizer" className="resizer vertical" onMouseDown={(e) => startDrag("side", e)}></div>
+        ) : null}
+        <main className="main" id="main" ref={mainRef}>
+          <section className="problem-pane" id="problem-pane" ref={leftRef} style={{ flex: `${leftGrow} 1 0`, minWidth: 0 }}>
             <div className="problem-tabs">
               <button className={`ptab${tab === "desc" ? " active" : ""}`} onClick={() => setTab("desc")}>
                 Description
               </button>
-              {tab === "result" || (lastRun && lastRun.qid === q?.id) ? (
+              {tab === "result" || resultView ? (
                 <button className={`ptab${tab === "result" ? " active" : ""}`} onClick={() => setTab("result")}>
                   Result
                 </button>
@@ -324,12 +395,11 @@ function WorkspaceInner() {
             {tab === "result" ? (
               <div id="ptab-result" className="ptab-panel active">
                 <div id="result-view">
-                  <ResultTabView
-                    lastRun={lastRun}
-                    qid={q?.id}
-                    getCode={() => editor.getCode()}
+                  <ResultPanel
+                    view={resultView}
+                    live={run.live}
                     lang={lang}
-                    complexity={complexity.lastComplexity}
+                    liveComplexity={complexity.lastComplexity}
                     expectedTime={q?.timeComplexity}
                     expectedSpace={q?.spaceComplexity}
                   />
@@ -341,7 +411,7 @@ function WorkspaceInner() {
                 <SubmissionsPanel
                   historyApi={history}
                   readOnly={false}
-                  onView={(e) => history.setViewingSubmission(e)}
+                  onView={openSubmission}
                   onRestore={doRestore}
                 />
               </div>
@@ -354,7 +424,8 @@ function WorkspaceInner() {
               </div>
             ) : null}
           </section>
-          <section className="editor-pane" id="editor-pane" style={{ flex: 1 }}>
+          <div id="main-resizer" className="resizer vertical" onMouseDown={(e) => startDrag("split", e)}></div>
+          <section className="editor-pane" id="editor-pane" ref={editorPaneRef} style={{ flex: `${editorGrow} 1 0`, minWidth: 0 }}>
             {history.viewingSubmission ? (
               <div id="submission-view" className="submission-view" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
                 <SubmissionView
@@ -382,9 +453,10 @@ function WorkspaceInner() {
                   onRun={doRun}
                   onShortcuts={() => setShortcutsOpen(true)}
                   onCustom={() => setCustomOpen((v) => !v)}
+                  topStyle={{ flex: `${topGrow} 1 0`, minHeight: 0 }}
                 />
-                <div id="editor-top" className="editor-top" style={{ display: "none" }}></div>
-                <div id="editor-bottom" className="editor-bottom">
+                <div id="editor-resizer" className="resizer horizontal" onMouseDown={(e) => startDrag("editor", e)}></div>
+                <div id="editor-bottom" className="editor-bottom" style={{ flex: `${bottomGrow} 1 0`, minHeight: 0 }}>
                   <div className="status-bar">
                     <span id="status-text">{status}</span>
                     <span id="last-run-meta">{lastRunMeta}</span>
@@ -422,29 +494,61 @@ function WorkspaceInner() {
   );
 }
 
-function ResultTabView({ lastRun, qid, getCode, lang, complexity, expectedTime, expectedSpace }) {
-  const payload = lastRun && lastRun.qid === qid ? lastRun.payload : null;
-  if (!payload) {
+ // Left Result tab content: live progress while running, final verdict after
+// run/submit, or a stored submission opened from history.
+function ResultPanel({ view, live, lang, liveComplexity, expectedTime, expectedSpace }) {
+  if (view && view.kind === "submission" && view.entry) {
+    const e = view.entry;
+    const cx =
+      e.complexityTime || e.complexitySpace ? { time: e.complexityTime || "?", space: e.complexitySpace || "?" } : null;
     return (
-      <div className="empty-state">
-        <h2>No submission yet</h2>
-        <p>
-          Hit <strong>Submit</strong> to see your verdict here, LeetCode-style.
-        </p>
-      </div>
+      <ResultTab
+        payload={{ mode: e.mode, results: e.results || [], total: e.total ?? (e.results || []).length, passed: e.passed ?? 0 }}
+        code={e.code}
+        langLabel={LANG_LABEL[e.language] || e.language}
+        lang={e.language}
+        sub={`${e.mode || "submit"} · ${e.language} · ${e.ts ? new Date(e.ts).toLocaleString() : ""}`}
+        complexity={cx}
+      />
+    );
+  }
+  if (view && view.kind === "run" && view.payload) {
+    const p = view.payload;
+    return (
+      <ResultTab
+        payload={p}
+        code={view.code}
+        langLabel={LANG_LABEL[view.lang] || view.lang}
+        lang={view.lang}
+        sub={`${p.mode} · ${view.lang} · just now`}
+        complexity={p.mode === "submit" ? liveComplexity : null}
+        expectedTime={expectedTime}
+        expectedSpace={expectedSpace}
+      />
+    );
+  }
+  if (live) {
+    const passed = (live.results || []).filter((r) => r.passed).length;
+    return (
+      <ResultTab
+        payload={{ mode: live.mode, results: live.results || [], total: live.total, passed }}
+        code={view?.code || ""}
+        langLabel={LANG_LABEL[lang] || lang}
+        lang={lang}
+        sub={`${live.mode} · running… ${passed}/${live.total} passed so far`}
+        complexity={null}
+        expectedTime={expectedTime}
+        expectedSpace={expectedSpace}
+      />
     );
   }
   return (
-    <ResultTab
-      payload={payload}
-      code={getCode()}
-      langLabel={{ cpp: "C++", javascript: "JavaScript", python: "Python" }[lang] || lang}
-      lang={lang}
-      sub={`submitted just now · ${lang}`}
-      complexity={complexity}
-      expectedTime={expectedTime}
-      expectedSpace={expectedSpace}
-    />
+    <div className="empty-state">
+      <h2>No submission yet</h2>
+      <p>
+        Hit <strong>Run</strong> or <strong>Submit</strong> to see your verdict here, LeetCode-style.
+      </p>
+    </div>
   );
 }
 

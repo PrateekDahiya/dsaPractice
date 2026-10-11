@@ -152,7 +152,7 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         }
         result = { mode, total, passed: results.filter((r) => r.passed).length, results };
         setLive(null);
-        await finish(mode, code, result);
+        finish(mode, code, result);
         return result;
       } catch (e) {
         // per-case failed: fall back to batch
@@ -169,19 +169,19 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         }
         result = await res.json();
         setLive(null);
-        await finish(mode, code, result);
+        finish(mode, code, result);
         return result;
       } catch (e) {
         const msg = String((e && e.message) || e);
         if (msg.includes("Failed to fetch") || msg.includes("fetch")) {
           result = await localRun(mode, code);
           setLive(null);
-          await finish(mode, code, result);
+          finish(mode, code, result);
           return result;
         }
         setLive(null);
         nt(msg);
-        await finish(mode, code, null);
+        finish(mode, code, null);
         return null;
       } finally {
         setRunning(false);
@@ -214,11 +214,11 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "custom run failed");
         const result = { mode: "run", total: data.total ?? 0, passed: data.passed ?? 0, results: data.results || [] };
-        await finish("run", code, result);
+        finish("run", code, result);
         return result;
       } catch (e) {
         nt(String((e && e.message) || e));
-        await finish("run", code, null);
+        finish("run", code, null);
         return null;
       } finally {
         setRunning(false);
