@@ -495,9 +495,11 @@ function WorkspaceInner() {
                   onBack={() => history.setViewingSubmission(null)}
                 />
               </div>
-            ) : (
-              <div id="editor-edit-mode" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-                <EditorPane
+            ) : null}
+            {/* Keep the editor mounted while a submission is open (display:none like the
+                vanilla app) so the draft and own-editor instance survive going back. */}
+            <div id="editor-edit-mode" style={{ display: history.viewingSubmission ? "none" : "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+              <EditorPane
                   lang={lang}
                   onLangChange={doLangChange}
                   onFormat={() => {
@@ -541,7 +543,6 @@ function WorkspaceInner() {
                   </div>
                 </div>
               </div>
-            )}
           </section>
         </main>
       </div>
