@@ -171,6 +171,7 @@ export function useRun({ getQuestion, getLang, getCode, saveHistory, requestComp
         result = { mode, total, passed: results.filter((r) => r.passed).length, results };
         setLive(null);
         finish(mode, code, result);
+        setRunning(false);
         return result;
       } catch (e) {
         // per-case failed: fall back to batch
