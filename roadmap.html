@@ -135,8 +135,8 @@
     function qRow(q){
       const st=solvedSet.has(q.id)?"solved":(attemptedSet.has(q.id)?"attempted":"todo");
       const mark=st==="solved"?'<span class="rm-mark" title="Solved">✓</span>':(st==="attempted"?'<span class="rm-mark" title="Attempted">●</span>':'<span class="rm-mark" title="Todo">·</span>');
-      const ai=(q.tags||[]).includes("ai-generated")?'<span class="rm-ai" title="AI generated">AI</span>':"";
-      const topics=(q.tags||[]).filter(t=>t!=="ai-generated"&&!t.startsWith("roadmap:"));
+      const ai=(q.tags||[]).includes("AI")?'<span class="rm-ai" title="AI generated">AI</span>':"";
+      const topics=(q.tags||[]).filter(t=>t!=="AI"&&!t.startsWith("roadmap:"));
       const s=statsMap[q.id]||{attempted:0,submissions:0,solved:0};
       const rate=s.attempted?Math.round(s.solved/s.attempted*100)+"%":"–";
       return `<div class="rm-row ${st}">

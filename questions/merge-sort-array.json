@@ -3,7 +3,7 @@
   "title": "Merge Sort an Array",
   "difficulty": "Easy",
   "tags": [
-    "ai-generated",
+    "AI",
     "roadmap:sorting"
   ],
   "problemStatement": "Given an integer array <code>nums</code>, return a new array containing the same elements in non‑decreasing order. You must implement the sorting using the merge sort algorithm yourself; using built‑in sorting functions is not allowed.",

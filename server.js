@@ -1331,7 +1331,7 @@ const server = http.createServer(async (req, res) => {
     try {
       await ensureDb();
       if (!dbReady) return sendJson(res, { error: "DB not ready" }, 500);
-      // ai-generated questions nobody ever solved (cap 50 per call)
+      // AI-tagged questions nobody ever solved (cap 50 per call)
       let rows = [];
       try {
         [rows] = await db.getPool().query(
@@ -1339,13 +1339,13 @@ const server = http.createServer(async (req, res) => {
            LEFT JOIN (SELECT DISTINCT questionId FROM submissions WHERE passed=total AND mode='submit') s ON s.questionId=q.id
            LEFT JOIN (SELECT DISTINCT questionId FROM manual_solved) m ON m.questionId=q.id
            WHERE s.questionId IS NULL AND m.questionId IS NULL
-             AND JSON_CONTAINS(q.tags, '"ai-generated"', '$')
+             AND JSON_CONTAINS(q.tags, '"AI"', '$')
            LIMIT 50`);
       } catch {
         [rows] = await db.getPool().query(
           `SELECT q.id FROM questions q
            LEFT JOIN (SELECT DISTINCT questionId FROM submissions WHERE passed=total AND mode='submit') s ON s.questionId=q.id
-           WHERE s.questionId IS NULL AND JSON_CONTAINS(q.tags, '"ai-generated"', '$')
+           WHERE s.questionId IS NULL AND JSON_CONTAINS(q.tags, '"AI"', '$')
            LIMIT 50`);
       }
       const deleted = [];
@@ -1419,7 +1419,7 @@ const server = http.createServer(async (req, res) => {
         });
         dailyCache = {
           date: today,
-          payload: { date: today, generated: true, questionId: result.id, title: result.title, difficulty: result.difficulty, tags: ["ai-generated", "daily:" + today] },
+          payload: { date: today, generated: true, questionId: result.id, title: result.title, difficulty: result.difficulty, tags: ["AI", "daily:" + today] },
         };
         console.log(`Daily question generated for ${today}: ${result.id} by ${u.username}`);
         return sendJson(res, { generated: true, questionId: result.id, title: result.title }, 201);
@@ -1730,7 +1730,7 @@ const server = http.createServer(async (req, res) => {
       e.status = 502;
       throw e;
     }
-    const tagSet = ["ai-generated", ...(Array.isArray(draft.tags) ? draft.tags.filter(t => typeof t === "string") : []), ...extraTags];
+    const tagSet = ["AI", ...(Array.isArray(draft.tags) ? draft.tags.filter(t => typeof t === "string") : []), ...extraTags];
     const q = {
       id: draft.id,
       title: draft.title,

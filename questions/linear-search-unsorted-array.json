@@ -3,7 +3,7 @@
   "title": "Linear Search in Unsorted Array",
   "difficulty": "Easy",
   "tags": [
-    "ai-generated",
+    "AI",
     "roadmap:arrays"
   ],
   "problemStatement": "Given an unsorted array of integers <code>nums</code> and an integer <code>target</code>, return the indices of all elements in <code>nums</code> that are equal to <code>target</code>. The order of indices in the output should match the order they appear in <code>nums</code>.\n\nIf no elements match the target, return an empty array.\n\nYou are expected to perform a linear scan of the array.",

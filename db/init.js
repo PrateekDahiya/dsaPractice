@@ -129,6 +129,8 @@ async function initDb() {
   `);
   try { await pool.query(`ALTER TABLE questions ADD COLUMN timeComplexity VARCHAR(50) NULL`); } catch {}
   try { await pool.query(`ALTER TABLE questions ADD COLUMN spaceComplexity VARCHAR(50) NULL`); } catch {}
+  // One-time rename: tag `ai-generated` -> `AI` (exact quoted token; idempotent no-op afterwards).
+  try { await pool.query(`UPDATE questions SET tags = REPLACE(tags, '"ai-generated"', '"AI"') WHERE tags LIKE '%ai-generated%'`); } catch (e) { console.warn('tag rename skipped:', e.message); }
   try {
     const { seedMethodDocs } = require('./methods');
     await seedMethodDocs();
