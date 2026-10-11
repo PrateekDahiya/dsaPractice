@@ -123,9 +123,12 @@ function buildComplexityPrompt(title, language, code) {
 
 function isBigO(s) { return typeof s === "string" && /^O\(.+\)$/.test(s.trim()); }
 
-function buildGenerationPrompt(topic, difficulty, extraTags) {
+function buildGenerationPrompt(topic, difficulty, extraTags, avoidTitles) {
   const tagHint = Array.isArray(extraTags) && extraTags.length
     ? ` Include these tags verbatim in "tags": ${JSON.stringify(extraTags)}.`
+    : "";
+  const avoid = Array.isArray(avoidTitles) && avoidTitles.length
+    ? ` Must be ORIGINAL — do NOT re-skin, rename, or paraphrase any of these existing questions (no shared titles, scenarios, or test setups): ${JSON.stringify(avoidTitles.slice(0, 100))}.`
     : "";
   return [
     {
@@ -135,7 +138,7 @@ function buildGenerationPrompt(topic, difficulty, extraTags) {
     {
       role: "user",
       content:
-`Write one ${difficulty} LeetCode-style question about: ${topic}.${tagHint}
+`Write one ${difficulty} LeetCode-style question about: ${topic}.${tagHint}${avoid}
 JSON keys (exactly): id (kebab-case slug), title, difficulty ("${difficulty}"), tags, problemStatement (plain text, >=40 chars, <code> allowed), constraints (non-empty string array), timeComplexity (expected optimal, e.g. "O(n)"), spaceComplexity (expected optimal, e.g. "O(1)"), examples (>0, [{input:"human-readable, e.g. nums = [2,7], target = 9", output:"[0,1]", explanation}]), functionName (camelCase JS), pythonFunctionName (snake_case), cppFunctionName (usually same as functionName), params (non-empty unique string array), starterCode ({javascript:"function F(...) {\\n}", python:"def f(...):\\n    pass", cpp: full skeleton, see below}), testInputsVisible (2-4x {id,input}), testInputsHidden (3-6x {id,input}, include edge cases: empty, single, duplicates, extremes), referenceSolution (JS string defining functionName, must RETURN the answer, no console.log).
 C++ skeleton (REQUIRED, infer types from example values: integer->int, float->double, true/false->bool, text->string, [1,2]->vector<int>, ["a"]->vector<string>, single chars->vector<char>): "#include <bits/stdc++.h>\\nusing namespace std;\\n\\n<Ret> <cppFunctionName>(<T1> <p1>, ...) {\\n    // write code here\\n    \\n}" where <Ret> matches what the reference returns (vector<int>, int, bool, string; void only for in-place + mutate first param).
 Rules: every test input must contain every param as JSON values (each input JSON <=2000 chars, no duplicate inputs). Keep inputs runnable in <1s. Do NOT include expectedOutputs — the server computes them.`,
@@ -201,4 +204,47 @@ function validateDraft(draft, difficulty) {
   return errs;
 }
 
-module.exports = { groqChat, extractJson, buildGenerationPrompt, buildComplexityPrompt, isBigO, validateDraft, ALLOWED_MODELS, DEFAULT_MODEL };
+// Originality guard (pure): is this draft just a copy of an existing question?
+// Returns { id, title, why } of the first match, or null. Three escalating checks:
+// 1. normalized title equality (ignores case/punctuation/spacing),
+// 2. title token-set Jaccard >= 0.8 (catches "Two Sum" vs "Two-Sum II"),
+// 3. statement token-set Jaccard >= 0.9 (catches copy-pasted statements).
+function normText(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+function wordSet(s) {
+  return new Set(String(s || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3));
+}
+function jaccard(a, b) {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+function findSimilarQuestion(draft, questions) {
+  if (!draft || !Array.isArray(questions) || !questions.length) return null;
+  const dTitle = normText(draft.title);
+  const dTitleWords = wordSet(draft.title);
+  const dStmtWords = wordSet(draft.problemStatement);
+  for (const q of questions) {
+    if (!q || q.id === draft.id) continue;
+    if (dTitle && normText(q.title) === dTitle) {
+      return { id: q.id, title: q.title, why: "same title" };
+    }
+    if (dTitleWords.size >= 2) {
+      const qw = wordSet(q.title);
+      if (qw.size >= 2 && jaccard(dTitleWords, qw) >= 0.8) {
+        return { id: q.id, title: q.title, why: "near-identical title" };
+      }
+    }
+    if (dStmtWords.size >= 20) {
+      const qw = wordSet(q.problemStatement);
+      if (qw.size >= 20 && jaccard(dStmtWords, qw) >= 0.9) {
+        return { id: q.id, title: q.title, why: "near-identical statement" };
+      }
+    }
+  }
+  return null;
+}
+
+module.exports = { groqChat, extractJson, buildGenerationPrompt, buildComplexityPrompt, isBigO, validateDraft, findSimilarQuestion, ALLOWED_MODELS, DEFAULT_MODEL };

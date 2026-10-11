@@ -1660,8 +1660,12 @@ const server = http.createServer(async (req, res) => {
   // Throws Error with .status on failure; returns {id,title,difficulty,visible,hidden,model,attempts}.
   async function runQuestionGeneration({ topic, difficulty, model, extraTags, user }) {
     const { runJS } = require("./server/utils/runner");
-    const { groqChat, extractJson, buildGenerationPrompt, validateDraft } = require("./server/utils/groq");
-    const messages = buildGenerationPrompt(topic, difficulty, extraTags);
+    const { groqChat, extractJson, buildGenerationPrompt, validateDraft, findSimilarQuestion } = require("./server/utils/groq");
+    // existing questions serve two duties: originality gate + prompt avoid-list
+    let existingQs = [];
+    try { existingQs = (await loadQuestions()) || []; } catch {}
+    const avoidTitles = existingQs.map((q) => q && q.title).filter(Boolean);
+    const messages = buildGenerationPrompt(topic, difficulty, extraTags, avoidTitles);
     const MAX_ATTEMPTS = 3;
     let draft = null, usedModel = null, visibleTestCases = null, hiddenTestCases = null;
     let lastError = "unknown error", attempts = 0;
@@ -1684,10 +1688,14 @@ const server = http.createServer(async (req, res) => {
           const badIn = validateTestCaseInputs([...draft.testInputsVisible, ...draft.testInputsHidden], draft.params);
           if (badIn) reasons.push(badIn);
         }
-        if (!reasons.length) {
-          const existing = await getQuestionById(draft.id);
-          if (existing) reasons.push(`id "${draft.id}" already exists — pick a different slug`);
-        }
+              if (!reasons.length) {
+                const existing = await getQuestionById(draft.id);
+                if (existing) reasons.push(`id "${draft.id}" already exists — pick a different slug`);
+              }
+              if (!reasons.length) {
+                const dup = findSimilarQuestion(draft, existingQs);
+                if (dup) reasons.push(`too similar to existing question "${dup.title}" (${dup.id}, ${dup.why}) — invent a genuinely different problem, not a re-skin`);
+              }
       }
       if (!reasons.length) {
         // oracle: run reference solution to compute every expectedOutput

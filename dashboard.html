@@ -164,13 +164,15 @@
       }
       function dailyCardHtml(){
         if(!daily) return "";
-        return `<div class="list-card" style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-color:var(--accent)">
-          <span style="font-size:20px">📅</span>
-          <div style="flex:1;min-width:200px">
-            <div style="font-size:12px;color:var(--muted)">Daily challenge · ${esc(daily.date)} (UTC)${daily.generated?" · fresh today ✨":""}${solvedIds.has(daily.questionId)?' · <span style="color:var(--green);font-weight:700">solved ✓</span>':""}</div>
-            <div style="font-size:15px;font-weight:800;margin-top:2px"><a href="index.html#${esc(daily.questionId)}" class="q-link">${esc(daily.title)}</a> <span class="badge ${esc(daily.difficulty)}">${esc(daily.difficulty)}</span></div>
+        const done=solvedIds.has(daily.questionId);
+        return `<div class="daily-card">
+          <span class="daily-icon">📅</span>
+          <div class="daily-body">
+            <div class="daily-eyebrow">Daily challenge <span class="daily-date">· ${esc(daily.date)}</span></div>
+            <div style="margin-top:3px"><a href="index.html#${esc(daily.questionId)}" class="daily-title">${esc(daily.title)}</a> <span class="badge ${esc(daily.difficulty)}">${esc(daily.difficulty)}</span></div>
+            <div class="daily-sub">${done?'<span class="daily-solved">Solved ✓ — nice work</span>':(daily.generated?'<span class="daily-fresh">Fresh today ✨ — generated for you</span>':"Rotation pick · Medium/Hard")}</div>
           </div>
-          <a href="index.html#${esc(daily.questionId)}" class="btn primary" style="padding:6px 14px;text-decoration:none">Solve →</a>
+          <a href="index.html#${esc(daily.questionId)}" class="btn primary" style="padding:8px 16px;text-decoration:none">${done?"Review →":"Solve →"}</a>
         </div>`;
       }
       const stats=data.stats;
