@@ -137,6 +137,16 @@ export default function ProblemsPage() {
         <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }} id="problems-sub">
           {list.length} of {questions.length} problems
         </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            className="btn ghost"
+            style={status === "saved" ? { borderColor: "var(--accent)", color: "var(--text)" } : {}}
+            title="Show only starred questions"
+            onClick={() => setStatus(status === "saved" ? "all" : "saved")}
+          >
+            ★ Starred
+          </button>
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
           <input
             placeholder="Search title/tag..."
@@ -209,7 +219,7 @@ export default function ProblemsPage() {
                   <tr key={x.id}>
                     <td style={{ color: "var(--muted)" }}>{i + 1}</td>
                     <td className="lb-user">
-                      <Link to={`/workspace#${x.id}`}>{x.title}</Link>
+                      <Link to={`/workspace/${x.id}`}>{x.title}</Link>
                       <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
                         {(x.tags || []).join(" · ")}
                       </div>

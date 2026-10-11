@@ -187,7 +187,7 @@ export default function DashboardPage() {
 
   const recentItems = recent.map((r) => (
     <li key={r.questionId}>
-      <Link to={`/workspace#${r.questionId}`} className="q-link">{r.title}</Link>
+      <Link to={`/workspace/${r.questionId}`} className="q-link">{r.title}</Link>
       <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <span className={`badge ${r.difficulty}`}>{r.difficulty}</span>
         <span style={{ color: "var(--muted)", fontSize: 11 }}>{new Date(r.solvedAt).toLocaleDateString()}</span>
@@ -196,13 +196,13 @@ export default function DashboardPage() {
   ));
   const unsolvedItems = unsolved.map((q) => (
     <li key={q.id}>
-      <Link to={`/workspace#${q.id}`} className="q-link">{q.title}</Link>
+      <Link to={`/workspace/${q.id}`} className="q-link">{q.title}</Link>
       <span className={`badge ${q.difficulty}`}>{q.difficulty}</span>
     </li>
   ));
   const addedItems = added.map((q) => (
     <li key={q.id}>
-      <Link to={`/workspace#${q.id}`} className="q-link">{q.title}</Link>
+      <Link to={`/workspace/${q.id}`} className="q-link">{q.title}</Link>
       <span className={`badge ${q.difficulty}`}>{q.difficulty}</span>
     </li>
   ));
@@ -237,7 +237,7 @@ export default function DashboardPage() {
                 Daily challenge <span className="daily-date">· {daily.date}</span>
               </div>
               <div style={{ marginTop: 3 }}>
-                <Link to={`/workspace#${daily.questionId}`} className="daily-title">{daily.title}</Link>{" "}
+                <Link to={`/workspace/${daily.questionId}`} className="daily-title">{daily.title}</Link>{" "}
                 <span className={`badge ${daily.difficulty}`}>{daily.difficulty}</span>
               </div>
               <div className="daily-sub">
@@ -251,7 +251,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <Link
-              to={`/workspace#${daily.questionId}`}
+              to={`/workspace/${daily.questionId}`}
               className="btn primary"
               style={{ padding: "8px 16px", textDecoration: "none" }}
             >

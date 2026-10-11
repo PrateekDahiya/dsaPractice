@@ -197,7 +197,7 @@ export default function RoadmapPage() {
         style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 13, flexWrap: "wrap" }}
       >
         {mark}
-        <Link to={`/workspace#${q.id}`} style={{ fontWeight: 600, color: "var(--text)", textDecoration: "none" }}>
+        <Link to={`/workspace/${q.id}`} style={{ fontWeight: 600, color: "var(--text)", textDecoration: "none" }}>
           {q.title}
         </Link>
         {ai}

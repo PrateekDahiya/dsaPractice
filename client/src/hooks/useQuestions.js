@@ -75,11 +75,6 @@ export function useQuestions() {
       q = await r2.json();
     }
     setCurrentQuestion(q);
-    try {
-      history.replaceState(null, "", `#${id}`);
-    } catch {
-      // non-browser / embedded contexts
-    }
     return q;
   }, []);
 

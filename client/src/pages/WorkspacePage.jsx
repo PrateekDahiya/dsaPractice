@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Topbar from "../components/Topbar.jsx";
 import ProblemList from "../components/ProblemList.jsx";
 import ProblemView from "../components/ProblemView.jsx";
@@ -23,6 +23,8 @@ const LANG_LABEL = { cpp: "C++", javascript: "JavaScript", python: "Python" };
 function WorkspaceInner() {
   const notify = useToast();
   const { user } = useAuth();
+  const { id: routeId } = useParams();
+  const navigate = useNavigate();
   const questions = useQuestions();
   const {
     currentQuestion: q,
@@ -174,29 +176,30 @@ function WorkspaceInner() {
   const openQuestionRef = useRef(openQuestion);
   openQuestionRef.current = openQuestion;
 
-  // boot: questions + solved state, then hash question or first question
+  // boot: questions + solved state, then canonical URL (first question if none)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const qs = await questions.fetchQuestions();
         await questions.refreshSolvedState();
-        if (cancelled) return;
-        const hash = (window.location.hash || "").slice(1);
-        if (hash && qs.some((x) => x.id === hash)) await openQuestionRef.current(hash);
-        else if (qs.length) await openQuestionRef.current(qs[0].id);
+        if (cancelled || !qs.length) return;
+        const want = routeId && qs.some((x) => x.id === routeId) ? routeId : qs[0].id;
+        if (want !== routeId) navigate(`/workspace/${want}`, { replace: true });
       } catch {
         setStatus("Failed to load questions. Run `node server.js`");
       }
     })();
-    const onHash = () => {
-      const id = (window.location.hash || "").slice(1);
-      if (id && (!qRef.current || id !== qRef.current.id)) openQuestionRef.current(id);
-    };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // URL is the source of truth: param change (links, back/forward) opens it
+  useEffect(() => {
+    if (!routeId) return;
+    if (qRef.current && routeId === qRef.current.id) return;
+    openQuestionRef.current(routeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId]);
 
   // keyboard: Ctrl+Enter run, Ctrl+Shift+Enter submit, Ctrl+S save
   useEffect(() => {
@@ -343,7 +346,7 @@ function WorkspaceInner() {
     try {
       const qs = await questions.deleteCurrentQuestion();
       notify("Deleted " + q.id);
-      if (qs.length) await openQuestion(qs[0].id);
+      if (qs.length) navigate(`/workspace/${qs[0].id}`, { replace: true });
     } catch (e) {
       notify("Delete failed: " + e.message);
     }
@@ -358,7 +361,7 @@ function WorkspaceInner() {
     notify(`Restored ${e.language} code to editor`);
     history.setViewingSubmission(null);
     setTab("desc");
-    if (qRef.current && e.questionId !== qRef.current.id) openQuestion(e.questionId);
+    if (qRef.current && e.questionId !== qRef.current.id) navigate(`/workspace/${e.questionId}`);
   }
 
   const me = user;
@@ -373,9 +376,6 @@ function WorkspaceInner() {
       <Topbar
         extra={
           <>
-            <button id="menu-toggle" className="btn ghost" title="Toggle problems" style={{ padding: "6px 10px" }} onClick={() => setShowSidebar((v) => !v)}>
-              ☰
-            </button>
             <span id="question-count">{listCount}</span>
             <Link to="/add-question" className="btn primary" style={{ padding: "6px 12px", textDecoration: "none" }}>
               + Add Question
@@ -384,6 +384,17 @@ function WorkspaceInner() {
         }
       />
       <div className="container" id="container">
+        {!showSidebar ? (
+          <button
+            id="menu-toggle"
+            className="btn ghost"
+            title="Open problems"
+            onClick={() => setShowSidebar(true)}
+            style={{ padding: "6px 10px", margin: "8px 0 8px 8px", alignSelf: "flex-start" }}
+          >
+            ☰
+          </button>
+        ) : null}
         {showSidebar ? (
           <aside className="sidebar" id="sidebar" style={{ width: sideW, minWidth: 200, maxWidth: 520, flexShrink: 0 }}>
             <ProblemList
@@ -393,7 +404,10 @@ function WorkspaceInner() {
               attemptedSet={attemptedSet}
               manualSet={manualSet}
               bookmarkedSet={bookmarkedSet}
-              onSelect={openQuestion}
+              onSelect={(id) => {
+                if (!qRef.current || id !== qRef.current.id) navigate(`/workspace/${id}`);
+              }}
+              onToggle={() => setShowSidebar(false)}
               onCount={setListCount}
             />
           </aside>
@@ -538,7 +552,7 @@ function WorkspaceInner() {
           onClose={() => setModal(null)}
           onSaved={async (id) => {
             await questions.fetchQuestions();
-            await openQuestion(id);
+            navigate(`/workspace/${id}`);
           }}
         />
       ) : null}

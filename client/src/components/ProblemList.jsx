@@ -11,6 +11,7 @@ export default function ProblemList({
   bookmarkedSet,
   onSelect,
   onCount,
+  onToggle,
 }) {
   const [search, setSearch] = useState("");
   const [diff, setDiff] = useState("all");
@@ -66,6 +67,11 @@ export default function ProblemList({
   return (
     <>
       <div className="sidebar-header">
+        {onToggle ? (
+          <button id="menu-toggle" className="btn ghost" title="Hide problems" style={{ padding: "6px 10px" }} onClick={onToggle}>
+            ☰
+          </button>
+        ) : null}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1 }}>
           <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort" style={sel}>
             <option value="recent">Recent</option>
@@ -79,6 +85,16 @@ export default function ProblemList({
             <option value="Hard">Hard</option>
           </select>
         </div>
+      </div>
+      <div className="sidebar-controls" style={{ padding: "8px 8px 0", display: "flex", gap: 6, borderBottom: "none" }}>
+        <button
+          className={`btn ghost${status === "saved" ? " active" : ""}`}
+          style={status === "saved" ? { flex: 1, borderColor: "var(--accent)", color: "var(--text)" } : { flex: 1 }}
+          title="Show only starred questions"
+          onClick={() => setStatus(status === "saved" ? "all" : "saved")}
+        >
+          ★ Starred
+        </button>
       </div>
       <div className="sidebar-controls" style={{ padding: 8, display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
         <input

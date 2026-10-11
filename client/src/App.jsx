@@ -17,7 +17,7 @@ import SettingsPage from "./pages/SettingsPage.jsx";
 function ScrollManager() {
   const { pathname } = useLocation();
   useEffect(() => {
-    const locked = pathname === "/workspace";
+    const locked = pathname === "/workspace" || pathname.startsWith("/workspace/");
     try {
       document.body.classList.toggle("route-locked", locked);
       document.body.classList.toggle("route-scroll", !locked);
@@ -29,7 +29,7 @@ function ScrollManager() {
 }
 
 // Route map mirrors the vanilla pages:
-//   / or /dashboard  <- dashboard.html      /workspace <- index.html (editor)
+//   / or /dashboard  <- dashboard.html      /workspace/:id <- index.html (editor)
 //   /problems         <- problems.html       /roadmap   <- roadmap.html
 //   /leaderboard      <- leaderboard.html    /login /register /admin /settings
 //   /add-question     <- add-question.html
@@ -41,7 +41,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/workspace" element={<WorkspacePage />} />
+          <Route path="/workspace/:id?" element={<WorkspacePage />} />
           <Route path="/problems" element={<ProblemsPage />} />
           <Route path="/roadmap" element={<RoadmapPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
